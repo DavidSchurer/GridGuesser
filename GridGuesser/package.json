@@ -8,7 +8,9 @@
     "start": "next start",
     "lint": "next lint",
     "server": "tsx watch server/index.ts",
-    "setup-db": "tsx scripts/setupDatabase.ts"
+    "setup-db": "tsx scripts/setupDatabase.ts",
+    "test-aws": "tsx scripts/testAwsConnection.ts",
+    "create-tables": "tsx scripts/createGameRoomsTable.ts"
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.940.0",
@@ -16,6 +18,7 @@
     "bcryptjs": "^3.0.3",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
     "express": "^4.19.2",
     "jsonwebtoken": "^9.0.2",
     "next": "14.2.15",

@@ -35,7 +35,7 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# image tiles (generated)
+# image tiles (generated - secure implementation)
 /public/tiles
 
 # documentation files (setup guides)
@@ -43,5 +43,10 @@ AWS_SETUP_GUIDE.md
 AUTHENTICATION_SETUP.md
 QUICK_START.md
 START_HERE.md
+SETUP_NOW.md
+GOOGLE_API_SETUP.md
+GOOGLE_IMAGES_INTEGRATION.md
+AWS_DYNAMODB_MIGRATION.md
+MIGRATION_COMPLETE.md
 ENV_TEMPLATE.txt
 

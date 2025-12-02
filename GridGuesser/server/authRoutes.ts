@@ -5,11 +5,16 @@ import {
   verifyPassword,
   updateUserProfile,
 } from "../lib/userService";
-import { generateToken } from "../lib/jwt";
+import { generateToken, verifyToken } from "../lib/jwt";
 import { authenticateToken } from "../lib/authMiddleware";
 import { AuthResponse, SignupRequest, LoginRequest } from "../lib/types";
 
 const router = Router();
+
+// Middleware to get token from cookie
+const getTokenFromCookie = (req: Request): string | null => {
+  return req.cookies?.auth_token || null;
+};
 
 // Signup endpoint
 router.post("/signup", async (req: Request, res: Response) => {
@@ -71,6 +76,14 @@ router.post("/signup", async (req: Request, res: Response) => {
       username: result.user.username,
     });
 
+    // Set HTTP-only cookie
+    res.cookie('auth_token', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    });
+
     res.status(201).json({
       success: true,
       message: "User created successfully",
@@ -80,7 +93,6 @@ router.post("/signup", async (req: Request, res: Response) => {
         email: result.user.email,
         stats: result.user.stats,
       },
-      token,
     } as AuthResponse);
   } catch (error) {
     console.error("Signup error:", error);
@@ -123,6 +135,14 @@ router.post("/login", async (req: Request, res: Response) => {
       username: result.user.username,
     });
 
+    // Set HTTP-only cookie
+    res.cookie('auth_token', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    });
+
     res.status(200).json({
       success: true,
       message: "Login successful",
@@ -132,7 +152,6 @@ router.post("/login", async (req: Request, res: Response) => {
         email: result.user.email,
         stats: result.user.stats,
       },
-      token,
     } as AuthResponse);
   } catch (error) {
     console.error("Login error:", error);
@@ -143,18 +162,41 @@ router.post("/login", async (req: Request, res: Response) => {
   }
 });
 
+// Logout endpoint
+router.post("/logout", (req: Request, res: Response) => {
+  res.clearCookie('auth_token');
+  res.status(200).json({
+    success: true,
+    message: "Logged out successfully",
+  });
+});
+
 // Get current user profile (protected route)
-router.get("/profile", authenticateToken, async (req: Request, res: Response) => {
+router.get("/profile", async (req: Request, res: Response) => {
   try {
-    if (!req.user) {
+    // Get token from cookie
+    const token = getTokenFromCookie(req);
+    
+    if (!token) {
       res.status(401).json({
         success: false,
-        message: "Unauthorized",
+        message: "Not authenticated",
       });
       return;
     }
 
-    const user = await getUserById(req.user.userId);
+    // Verify token
+    const payload = verifyToken(token);
+    
+    if (!payload) {
+      res.status(401).json({
+        success: false,
+        message: "Invalid or expired session",
+      });
+      return;
+    }
+
+    const user = await getUserById(payload.userId);
 
     if (!user) {
       res.status(404).json({
@@ -186,19 +228,33 @@ router.get("/profile", authenticateToken, async (req: Request, res: Response) =>
 });
 
 // Update user profile (protected route)
-router.patch("/profile", authenticateToken, async (req: Request, res: Response) => {
+router.patch("/profile", async (req: Request, res: Response) => {
   try {
-    if (!req.user) {
+    // Get token from cookie
+    const token = getTokenFromCookie(req);
+    
+    if (!token) {
       res.status(401).json({
         success: false,
-        message: "Unauthorized",
+        message: "Not authenticated",
+      });
+      return;
+    }
+
+    // Verify token
+    const payload = verifyToken(token);
+    
+    if (!payload) {
+      res.status(401).json({
+        success: false,
+        message: "Invalid or expired session",
       });
       return;
     }
 
     const { username, avatarUrl, settings } = req.body;
 
-    const result = await updateUserProfile(req.user.userId, {
+    const result = await updateUserProfile(payload.userId, {
       username,
       avatarUrl,
       settings,
@@ -226,12 +282,31 @@ router.patch("/profile", authenticateToken, async (req: Request, res: Response) 
 });
 
 // Verify token endpoint (useful for checking if user is still logged in)
-router.get("/verify", authenticateToken, (req: Request, res: Response) => {
+router.get("/verify", (req: Request, res: Response) => {
+  const token = getTokenFromCookie(req);
+  
+  if (!token) {
+    res.status(401).json({
+      success: false,
+      message: "Not authenticated",
+    });
+    return;
+  }
+
+  const payload = verifyToken(token);
+  
+  if (!payload) {
+    res.status(401).json({
+      success: false,
+      message: "Invalid or expired session",
+    });
+    return;
+  }
+
   res.status(200).json({
     success: true,
-    user: req.user,
+    user: payload,
   });
 });
 
 export default router;
-

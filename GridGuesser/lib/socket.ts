@@ -6,14 +6,10 @@ let socket: Socket | null = null;
 
 export const getSocket = (): Socket => {
   if (!socket) {
-    // Get auth token from localStorage
-    const token = typeof window !== 'undefined' ? localStorage.getItem("auth_token") : null;
-    
+    // Cookies are sent automatically with withCredentials
     socket = io(process.env.NEXT_PUBLIC_SOCKET_URL || "http://localhost:3001", {
       autoConnect: false,
-      auth: {
-        token: token || undefined,
-      },
+      withCredentials: true, // Send cookies with Socket.IO requests
     });
   }
   return socket;
@@ -34,7 +30,7 @@ export const disconnectSocket = () => {
   }
 };
 
-// Reconnect with new auth token (for when user logs in/out)
+// Reconnect (for when user logs in/out)
 export const reconnectSocket = () => {
   disconnectSocket();
   return connectSocket();

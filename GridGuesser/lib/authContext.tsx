@@ -29,38 +29,41 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Load user from localStorage on mount
+  // Load user from server on mount (checks cookie)
   useEffect(() => {
-    const storedToken = localStorage.getItem("auth_token");
-    const storedUser = localStorage.getItem("auth_user");
-
-    if (storedToken && storedUser) {
-      setToken(storedToken);
-      setUser(JSON.parse(storedUser));
-      
-      // Verify token is still valid
-      verifyToken(storedToken).catch(() => {
-        // Token invalid, clear auth
-        logout();
+    verifySession()
+      .then((valid) => {
+        if (!valid) {
+          setUser(null);
+          setToken(null);
+        }
+      })
+      .finally(() => {
+        setLoading(false);
       });
-    }
-    
-    setLoading(false);
   }, []);
 
-  const verifyToken = async (token: string) => {
+  const verifySession = async (): Promise<boolean> => {
     try {
       const response = await fetch(`${API_URL}/auth/verify`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+        method: "GET",
+        credentials: "include", // Send cookies
       });
 
       if (!response.ok) {
-        throw new Error("Token invalid");
+        return false;
       }
+
+      const data = await response.json();
+      if (data.success && data.user) {
+        // Session is valid, fetch full profile
+        await refreshProfile();
+        return true;
+      }
+      return false;
     } catch (error) {
-      throw error;
+      console.error("Session verification error:", error);
+      return false;
     }
   };
 
@@ -71,16 +74,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         headers: {
           "Content-Type": "application/json",
         },
+        credentials: "include", // Send/receive cookies
         body: JSON.stringify({ email, password }),
       });
 
       const data: AuthResponse = await response.json();
 
-      if (data.success && data.user && data.token) {
+      if (data.success && data.user) {
+        // Cookie is set by server automatically
         setUser(data.user);
-        setToken(data.token);
-        localStorage.setItem("auth_token", data.token);
-        localStorage.setItem("auth_user", JSON.stringify(data.user));
+        setToken(null); // Don't store token in frontend
         return { success: true };
       }
 
@@ -98,16 +101,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         headers: {
           "Content-Type": "application/json",
         },
+        credentials: "include", // Send/receive cookies
         body: JSON.stringify({ username, email, password }),
       });
 
       const data: AuthResponse = await response.json();
 
-      if (data.success && data.user && data.token) {
+      if (data.success && data.user) {
+        // Cookie is set by server automatically
         setUser(data.user);
-        setToken(data.token);
-        localStorage.setItem("auth_token", data.token);
-        localStorage.setItem("auth_user", JSON.stringify(data.user));
+        setToken(null); // Don't store token in frontend
         return { success: true };
       }
 
@@ -118,28 +121,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const logout = () => {
-    setUser(null);
-    setToken(null);
-    localStorage.removeItem("auth_token");
-    localStorage.removeItem("auth_user");
+  const logout = async () => {
+    try {
+      await fetch(`${API_URL}/auth/logout`, {
+        method: "POST",
+        credentials: "include", // Send cookies
+      });
+    } catch (error) {
+      console.error("Logout error:", error);
+    } finally {
+      // Clear state regardless
+      setUser(null);
+      setToken(null);
+    }
   };
 
   const refreshProfile = async () => {
-    if (!token) return;
-
     try {
       const response = await fetch(`${API_URL}/auth/profile`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+        method: "GET",
+        credentials: "include", // Send cookies
       });
 
       const data = await response.json();
 
       if (data.success && data.user) {
         setUser(data.user);
-        localStorage.setItem("auth_user", JSON.stringify(data.user));
       }
     } catch (error) {
       console.error("Error refreshing profile:", error);

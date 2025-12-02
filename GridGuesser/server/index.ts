@@ -1,3 +1,8 @@
+// Load environment variables from .env.local
+import dotenv from "dotenv";
+import path from "path";
+dotenv.config({ path: path.join(__dirname, '../.env.local') });
+
 import express from "express";
 import { createServer } from "http";
 import { Server, Socket } from "socket.io";
@@ -5,8 +10,27 @@ import cors from "cors";
 import cookieParser from "cookie-parser";
 import { GameRoom, Player, ImageMetadata, AuthenticatedPlayer } from "../lib/types";
 import imagesData from "../lib/images.json";
-import { verifyToken, extractTokenFromHeader } from "../lib/jwt";
+import { verifyToken } from "../lib/jwt";
 import { isDynamoDBConfigured } from "../lib/dynamodb";
+import { 
+  fetchTwoImagesForGame, 
+  isGoogleApiConfigured, 
+  CategoryKey,
+  CATEGORIES
+} from "../lib/googleImagesApi";
+import {
+  createGameRoom,
+  getGameRoom,
+  updateGameRoom,
+  addPlayerToRoom,
+  updateGameImages,
+  updatePlayerSocketId,
+  cleanupOldGameRooms,
+  getActiveGameRooms,
+  deleteGameRoom,
+  storeUserCategory,
+  getUserCategory,
+} from "../lib/gameRoomService";
 
 const app = express();
 const httpServer = createServer(app);
@@ -19,35 +43,76 @@ app.use(cors({
 app.use(express.json());
 app.use(cookieParser());
 
-// Check if AWS is configured and use appropriate auth routes
-const useMockAuth = !isDynamoDBConfigured();
-
-if (useMockAuth) {
-  console.log("\n⚠️  ============================================");
-  console.log("⚠️  AWS NOT CONFIGURED - USING MOCK AUTH");
-  console.log("⚠️  Data will NOT persist between restarts!");
-  console.log("⚠️  Set up .env.local for production use");
-  console.log("⚠️  See AWS_SETUP_GUIDE.md for instructions");
-  console.log("⚠️  ============================================\n");
-  
-  import("./mockAuth").then(module => {
-    app.use("/api/auth", module.default);
-  });
-} else {
-  console.log("✅ AWS DynamoDB configured - using persistent storage");
-  import("./authRoutes").then(module => {
-    app.use("/api/auth", module.default);
-  });
+// Check if AWS is configured
+if (!isDynamoDBConfigured()) {
+  console.error("\n==============================================");
+  console.error("ERROR: AWS DynamoDB is NOT configured!");
+  console.error("");
+  console.error("Your .env.local must contain:");
+  console.error("  AWS_ACCESS_KEY_ID=your_key");
+  console.error("  AWS_SECRET_ACCESS_KEY=your_secret");
+  console.error("  AWS_REGION=us-east-1");
+  console.error("");
+  console.error("Current error: UnrecognizedClientException");
+  console.error("This means your AWS credentials are INVALID");
+  console.error("");
+  console.error("To fix:");
+  console.error("1. Go to AWS IAM Console");
+  console.error("2. Create NEW access keys");
+  console.error("3. Update .env.local (no spaces, no quotes)");
+  console.error("4. Restart server");
+  console.error("");
+  console.error("See SETUP_NOW.md for step-by-step instructions");
+  console.error("==============================================\n");
+  process.exit(1);
 }
+
+console.log("AWS DynamoDB configured - using persistent storage");
+import authRoutes from "./authRoutes";
+app.use("/api/auth", authRoutes);
 
 // Health check endpoint
 app.get("/api/health", (req, res) => {
   res.json({ 
     status: "ok", 
     message: "GridGuesser API is running",
-    authMode: useMockAuth ? "mock" : "dynamodb",
-    awsConfigured: !useMockAuth
+    authMode: "dynamodb",
+    awsConfigured: true,
+    googleApiConfigured: isGoogleApiConfigured()
   });
+});
+
+// Tile serving endpoint - only serves individual tiles
+import { getTilePath } from "../lib/tileGenerator";
+app.get("/api/tiles/:imageHash/:tileIndex", (req, res) => {
+  const { imageHash, tileIndex } = req.params;
+  const tileIndexNum = parseInt(tileIndex, 10);
+
+  // Validate tile index
+  if (isNaN(tileIndexNum) || tileIndexNum < 0 || tileIndexNum >= 100) {
+    res.status(400).json({ error: "Invalid tile index" });
+    return;
+  }
+
+  const tilePath = getTilePath(imageHash, tileIndexNum);
+  
+  if (!tilePath) {
+    res.status(404).json({ error: "Tile not found" });
+    return;
+  }
+
+  // Serve the tile image
+  res.sendFile(tilePath);
+});
+
+// Get available categories
+app.get("/api/categories", (req, res) => {
+  const categories = Object.entries(CATEGORIES).map(([key, value]) => ({
+    id: key,
+    name: value.name,
+    searchTermsCount: value.searchTerms.length
+  }));
+  res.json({ categories });
 });
 
 const io = new Server(httpServer, {
@@ -58,18 +123,13 @@ const io = new Server(httpServer, {
   },
 });
 
-// In-memory storage for game rooms
-const gameRooms = new Map<string, GameRoom>();
 const images: ImageMetadata[] = imagesData as ImageMetadata[];
 
-// Helper function to get the two images (one for each player)
+// Helper function to get the two images (one for each player) - fallback only
 function getTwoRandomImages(): [ImageMetadata, ImageMetadata] {
-  // Always return the same two images in order
-  // Player 1 gets image-1, Player 2 gets image-2
   if (images.length >= 2) {
     return [images[0], images[1]];
   }
-  // Fallback if not enough images
   return [images[0], images[0]];
 }
 
@@ -78,28 +138,41 @@ function generateRoomId(): string {
   return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
-// Clean up old rooms (older than 1 hour)
-setInterval(() => {
-  const now = Date.now();
-  const oneHour = 60 * 60 * 1000;
-  
-  Array.from(gameRooms.entries()).forEach(([roomId, room]) => {
-    if (now - room.createdAt > oneHour) {
-      gameRooms.delete(roomId);
-      console.log(`Cleaned up old room: ${roomId}`);
+// Clean up old rooms in DynamoDB (older than 1 hour)
+setInterval(async () => {
+  try {
+    const deletedCount = await cleanupOldGameRooms(60 * 60 * 1000); // 1 hour
+    if (deletedCount > 0) {
+      console.log(`Cleaned up ${deletedCount} old game rooms from DynamoDB`);
     }
-  });
+  } catch (error) {
+    console.error("Error cleaning up game rooms:", error);
+  }
 }, 5 * 60 * 1000); // Run every 5 minutes
 
-// Socket.IO authentication middleware
+// Socket.IO authentication middleware - get token from cookie
 io.use((socket, next) => {
-  const token = socket.handshake.auth.token;
+  // Get token from cookie header
+  const cookies = socket.handshake.headers.cookie;
+  let token = null;
+  
+  if (cookies) {
+    const cookieArray = cookies.split(';');
+    for (const cookie of cookieArray) {
+      const [name, value] = cookie.trim().split('=');
+      if (name === 'auth_token') {
+        token = value;
+        break;
+      }
+    }
+  }
   
   if (token) {
     const payload = verifyToken(token);
     if (payload) {
       (socket as any).userId = payload.userId;
       (socket as any).username = payload.username;
+      (socket as any).email = payload.email;
     }
   }
   
@@ -113,80 +186,74 @@ io.on("connection", (socket: Socket) => {
   console.log(`User connected: ${socket.id}${userId ? ` (User: ${username})` : " (Guest)"}`);
 
   // Create a new game room
-  socket.on("create-room", (data: { playerName: string }, callback: (roomId: string) => void) => {
+  socket.on("create-room", async (data: { playerName: string; category?: string }, callback: (roomId: string) => void) => {
     const roomId = generateRoomId();
+    const category = data.category || 'landmarks';
+    const playerName = data.playerName || username || 'Player 1';
     
-    const player: AuthenticatedPlayer = {
-      id: socket.id,
-      socketId: socket.id,
-      playerIndex: 0,
-      name: data.playerName || username || 'Player 1',
-      userId: userId,
-      isGuest: !userId,
-    };
-
-    const room: GameRoom = {
-      roomId,
-      players: [player],
-      currentTurn: 0,
-      gameState: "waiting",
-      revealedTiles: [[], []],
-      images: ["", ""],
-      imageNames: ["", ""],
-      points: [0, 0],
-      createdAt: Date.now(),
-    };
-
-    gameRooms.set(roomId, room);
+    // Store user's category preference if logged in
+    if (userId) {
+      await storeUserCategory(userId, category);
+    }
+    
+    // Create room in DynamoDB
+    const result = await createGameRoom(roomId, userId, playerName, category);
+    
+    if (!result.success || !result.room) {
+      console.error(`Failed to create room: ${result.error}`);
+      callback(""); // Empty string indicates failure
+      return;
+    }
+    
+    // Update socket ID in DynamoDB
+    await updatePlayerSocketId(roomId, 0, socket.id);
+    
     socket.join(roomId);
     
-    console.log(`Room created: ${roomId} by ${socket.id}`);
+    console.log(`Room created in DynamoDB: ${roomId} by ${username || 'Guest'} (${socket.id}) with category: ${category}`);
     callback(roomId);
   });
 
   // Create a room with a specific ID
-  socket.on("create-room-with-id", (data: { roomId: string; playerName: string }, callback: (success: boolean, error?: string) => void) => {
-    const { roomId, playerName } = data;
+  socket.on("create-room-with-id", async (data: { roomId: string; playerName: string; category?: string }, callback: (success: boolean, error?: string) => void) => {
+    const { roomId, playerName, category } = data;
     
-    // Check if room already exists
-    const existingRoom = gameRooms.get(roomId);
+    // Check if room already exists in DynamoDB
+    const existingRoom = await getGameRoom(roomId);
     if (existingRoom) {
       callback(false, "Room already exists");
       return;
     }
 
-    const player: AuthenticatedPlayer = {
-      id: socket.id,
-      socketId: socket.id,
-      playerIndex: 0,
-      name: playerName || username || 'Player 1',
-      userId: userId,
-      isGuest: !userId,
-    };
-
-    const room: GameRoom = {
-      roomId,
-      players: [player],
-      currentTurn: 0,
-      gameState: "waiting",
-      revealedTiles: [[], []],
-      images: ["", ""],
-      imageNames: ["", ""],
-      points: [0, 0],
-      createdAt: Date.now(),
-    };
-
-    gameRooms.set(roomId, room);
+    const selectedCategory = category || 'landmarks';
+    const finalPlayerName = playerName || username || 'Player 1';
+    
+    // Store user's category preference if logged in
+    if (userId) {
+      await storeUserCategory(userId, selectedCategory);
+    }
+    
+    // Create room in DynamoDB
+    const result = await createGameRoom(roomId, userId, finalPlayerName, selectedCategory);
+    
+    if (!result.success) {
+      callback(false, result.error || "Failed to create room");
+      return;
+    }
+    
+    // Update socket ID
+    await updatePlayerSocketId(roomId, 0, socket.id);
+    
     socket.join(roomId);
     
-    console.log(`Room created with ID: ${roomId} by ${socket.id}`);
+    console.log(`Room created in DynamoDB with ID: ${roomId} by ${username || 'Guest'} (${socket.id}) with category: ${selectedCategory}`);
     callback(true);
   });
 
   // Join an existing room
-  socket.on("join-room", (data: { roomId: string; playerName: string }, callback: (success: boolean, playerIndex?: 0 | 1, error?: string) => void) => {
+  socket.on("join-room", async (data: { roomId: string; playerName: string }, callback: (success: boolean, playerIndex?: 0 | 1, error?: string) => void) => {
     const { roomId, playerName } = data;
-    const room = gameRooms.get(roomId);
+    const room = await getGameRoom(roomId);
 
     if (!room) {
       callback(false, undefined, "Room not found");
@@ -203,49 +270,93 @@ io.on("connection", (socket: Socket) => {
       return;
     }
 
-    const player: AuthenticatedPlayer = {
-      id: socket.id,
-      socketId: socket.id,
-      playerIndex: 1,
-      name: playerName || username || 'Player 2',
-      userId: userId,
-      isGuest: !userId,
-    };
+    const finalPlayerName = playerName || username || 'Player 2';
+    
+    // Add player to room in DynamoDB
+    const addPlayerResult = await addPlayerToRoom(roomId, userId, finalPlayerName, socket.id);
+    
+    if (!addPlayerResult.success || !addPlayerResult.room) {
+      callback(false, undefined, addPlayerResult.error || "Failed to join room");
+      return;
+    }
 
-    room.players.push(player);
     socket.join(roomId);
 
-    // Assign images to both players
-    const [image1, image2] = getTwoRandomImages();
-    room.images = [image1.id, image2.id];
-    room.imageNames = [image1.name, image2.name];
-    room.gameState = "playing";
-
-    gameRooms.set(roomId, room);
-
-    console.log(`Player joined room ${roomId}: ${socket.id}`);
+    // Fetch images based on selected category
+    const category = (addPlayerResult.room.category || 'landmarks') as CategoryKey;
     
-    // Notify both players that the game is starting
-    io.to(roomId).emit("game-start", {
-      roomId,
-      players: room.players,
-      currentTurn: room.currentTurn,
-      images: room.images,
-    });
+    try {
+      const [image1, image2] = await fetchTwoImagesForGame(category);
+      
+      if (image1 && image2) {
+        // Successfully fetched images from Google API - store in DynamoDB
+        await updateGameImages(roomId, [image1, image2]);
+        console.log(`Fetched and stored images in DynamoDB: "${image1.title}" and "${image2.title}"`);
+        
+        // Get updated room from DynamoDB
+        const updatedRoom = await getGameRoom(roomId);
+        if (updatedRoom) {
+          // Notify both players that the game is starting
+          // DO NOT send full image URLs - only send imageHashes for tile access
+          io.to(roomId).emit("game-start", {
+            roomId,
+            players: updatedRoom.players,
+            currentTurn: updatedRoom.currentTurn,
+            imageHashes: updatedRoom.imageHashes, // Only send hashes, not full URLs
+            category: updatedRoom.category,
+          });
+        }
+      } else {
+        // Fallback to static images
+        console.log('WARNING: Google API failed, using static images');
+        const [fallbackImage1, fallbackImage2] = getTwoRandomImages();
+        
+        addPlayerResult.room.images = [fallbackImage1.id, fallbackImage2.id];
+        addPlayerResult.room.imageNames = [fallbackImage1.name, fallbackImage2.name];
+        addPlayerResult.room.gameState = "playing";
+        await updateGameRoom(addPlayerResult.room);
+        
+        io.to(roomId).emit("game-start", {
+          roomId,
+          players: addPlayerResult.room.players,
+          currentTurn: addPlayerResult.room.currentTurn,
+          images: addPlayerResult.room.images,
+          category: addPlayerResult.room.category,
+        });
+      }
 
-    callback(true, 1);
+      console.log(`Player joined room ${roomId}: ${username || 'Guest'} (${socket.id})`);
+      callback(true, 1);
+    } catch (error) {
+      console.error('Error in join-room:', error);
+      callback(false, undefined, "Failed to start game");
+    }
   });
 
-  // Get current game state
-  socket.on("get-game-state", (roomId: string, callback: (room: GameRoom | null) => void) => {
-    const room = gameRooms.get(roomId);
-    callback(room || null);
+  // Get current game state from DynamoDB
+  // SECURITY: Filter out full image URLs before sending to client
+  socket.on("get-game-state", async (roomId: string, callback: (room: any) => void) => {
+    const room = await getGameRoom(roomId);
+    if (!room) {
+      callback(null);
+      return;
+    }
+
+    // Create a safe version without full image URLs
+    const safeRoom = {
+      ...room,
+      images: undefined, // Never send full image URLs
+      imageHashes: room.imageHashes, // Only send hashes
+      imageMetadata: undefined, // Don't send full metadata
+    };
+
+    callback(safeRoom);
   });
 
   // Reveal a tile
-  socket.on("reveal-tile", (data: { roomId: string; tileIndex: number }, callback: (success: boolean, error?: string) => void) => {
+  socket.on("reveal-tile", async (data: { roomId: string; tileIndex: number }, callback: (success: boolean, error?: string) => void) => {
     const { roomId, tileIndex } = data;
-    const room = gameRooms.get(roomId);
+    const room = await getGameRoom(roomId);
 
     if (!room) {
       callback(false, "Room not found");
@@ -285,18 +396,27 @@ io.on("connection", (socket: Socket) => {
     // Award 1 point to the player who revealed the tile
     room.points[playerIndex] += 1;
 
-    // Switch turn
-    room.currentTurn = (1 - room.currentTurn) as 0 | 1;
+    // Check if skip turn power-up is active
+    if (room.skipTurnActive) {
+      // Don't switch turn, but reset the flag for next time
+      room.skipTurnActive = false;
+      console.log(`Skip turn active - ${room.players[playerIndex].name} gets another turn`);
+    } else {
+      // Normal turn switch
+      room.currentTurn = (1 - room.currentTurn) as 0 | 1;
+    }
 
-    gameRooms.set(roomId, room);
+    // Update room in DynamoDB
+    await updateGameRoom(room);
 
     // Broadcast tile reveal to both players
+    // SECURITY: Only send imageHash, not full URL
     io.to(roomId).emit("tile-revealed", {
       tileIndex,
       playerIndex: opponentIndex,
       revealedBy: playerIndex,
       currentTurn: room.currentTurn,
-      imageId: room.images[opponentIndex],
+      imageHash: room.imageHashes[opponentIndex], // Send hash instead of full URL
       points: room.points,
     });
 
@@ -304,9 +424,9 @@ io.on("connection", (socket: Socket) => {
   });
 
   // Submit a guess
-  socket.on("submit-guess", (data: { roomId: string; guess: string }, callback: (success: boolean, correct?: boolean, error?: string) => void) => {
+  socket.on("submit-guess", async (data: { roomId: string; guess: string }, callback: (success: boolean, correct?: boolean, error?: string) => void) => {
     const { roomId, guess } = data;
-    const room = gameRooms.get(roomId);
+    const room = await getGameRoom(roomId);
 
     if (!room) {
       callback(false, false, "Room not found");
@@ -339,35 +459,43 @@ io.on("connection", (socket: Socket) => {
     if (isCorrect) {
       room.gameState = "finished";
       room.winner = playerIndex as 0 | 1;
-      gameRooms.set(roomId, room);
+      
+      // Update room in DynamoDB
+      await updateGameRoom(room);
 
-      // Update user stats for both players (if authenticated and using DynamoDB)
-      const winnerPlayer = room.players[playerIndex] as AuthenticatedPlayer;
-      const loserPlayer = room.players[opponentIndex] as AuthenticatedPlayer;
+      // Update user stats for both players (if authenticated)
+      const winnerPlayer = room.players[playerIndex];
+      const loserPlayer = room.players[opponentIndex];
 
-      if (!useMockAuth) {
-        // Only update stats if using DynamoDB
-        import("../lib/userService").then(({ updateUserStats }) => {
-          // Update winner stats
-          if (winnerPlayer.userId) {
-            updateUserStats(winnerPlayer.userId, {
-              won: true,
-              points: room.points[playerIndex],
-              tilesRevealed: room.revealedTiles[playerIndex].length,
-              guessedCorrectly: true,
-            }).catch(error => console.error("Error updating winner stats:", error));
-          }
+      // Update stats in DynamoDB
+      const { updateUserStats, getUserById } = await import("../lib/userService");
+      
+      // Update winner stats (check if id is a real userId, not a guest UUID)
+      const winnerUser = await getUserById(winnerPlayer.id);
+      if (winnerUser) {
+        console.log(`Updating winner stats for user: ${winnerUser.username}`);
+        await updateUserStats(winnerPlayer.id, {
+          won: true,
+          points: room.points[playerIndex],
+          tilesRevealed: room.revealedTiles[playerIndex].length,
+          guessedCorrectly: true,
+        }).catch(error => console.error("Error updating winner stats:", error));
+      } else {
+        console.log(`Guest player won - no stats to update`);
+      }
 
-          // Update loser stats
-          if (loserPlayer.userId) {
-            updateUserStats(loserPlayer.userId, {
-              won: false,
-              points: room.points[opponentIndex],
-              tilesRevealed: room.revealedTiles[opponentIndex].length,
-              guessedCorrectly: false,
-            }).catch(error => console.error("Error updating loser stats:", error));
-          }
-        }).catch(error => console.error("Error loading userService:", error));
+      // Update loser stats (check if id is a real userId, not a guest UUID)
+      const loserUser = await getUserById(loserPlayer.id);
+      if (loserUser) {
+        console.log(`Updating loser stats for user: ${loserUser.username}`);
+        await updateUserStats(loserPlayer.id, {
+          won: false,
+          points: room.points[opponentIndex],
+          tilesRevealed: room.revealedTiles[opponentIndex].length,
+          guessedCorrectly: false,
+        }).catch(error => console.error("Error updating loser stats:", error));
+      } else {
+        console.log(`Guest player lost - no stats to update`);
       }
 
       // Broadcast game end
@@ -381,7 +509,9 @@ io.on("connection", (socket: Socket) => {
     } else {
       // Wrong guess, switch turn
       room.currentTurn = (1 - room.currentTurn) as 0 | 1;
-      gameRooms.set(roomId, room);
+      
+      // Update room in DynamoDB
+      await updateGameRoom(room);
 
       // Broadcast wrong guess
       io.to(roomId).emit("wrong-guess", {
@@ -395,9 +525,9 @@ io.on("connection", (socket: Socket) => {
   });
 
   // Use power-up
-  socket.on("use-power-up", (data: { roomId: string; powerUpId: string; tileIndex?: number }, callback: (success: boolean, error?: string) => void) => {
+  socket.on("use-power-up", async (data: { roomId: string; powerUpId: string; tileIndex?: number }, callback: (success: boolean, error?: string) => void) => {
     const { roomId, powerUpId, tileIndex } = data;
-    const room = gameRooms.get(roomId);
+    const room = await getGameRoom(roomId);
 
     if (!room) {
       callback(false, "Room not found");
@@ -442,13 +572,13 @@ io.on("connection", (socket: Socket) => {
     // Execute power-up
     switch (powerUpId) {
       case "skip":
-        // Skip opponent's turn (stay on current player's turn)
-        // Don't change currentTurn
+        // Skip opponent's turn - allow current player to take an extra turn
+        room.skipTurnActive = true;
         io.to(roomId).emit("power-up-used", {
           powerUpId,
           usedBy: playerIndex,
           points: room.points,
-          message: `${room.players[playerIndex].name} used Skip Turn!`,
+          message: `${room.players[playerIndex].name} used Skip Turn! Take an extra turn!`,
         });
         break;
 
@@ -473,6 +603,9 @@ io.on("connection", (socket: Socket) => {
           }
         }
 
+        // Switch turn after using power-up
+        room.currentTurn = (1 - room.currentTurn) as 0 | 1;
+
         io.to(roomId).emit("power-up-used", {
           powerUpId,
           usedBy: playerIndex,
@@ -480,6 +613,7 @@ io.on("connection", (socket: Socket) => {
           revealedTiles: tilesToReveal,
           allRevealedTiles: room.revealedTiles,
           points: room.points,
+          currentTurn: room.currentTurn,
           message: `${room.players[playerIndex].name} revealed a 2x2 area!`,
         });
         break;
@@ -489,6 +623,9 @@ io.on("connection", (socket: Socket) => {
         const allTiles = Array.from({ length: 100 }, (_, i) => i);
         room.revealedTiles[opponentIndex] = allTiles;
 
+        // Switch turn after using power-up
+        room.currentTurn = (1 - room.currentTurn) as 0 | 1;
+
         io.to(roomId).emit("power-up-used", {
           powerUpId,
           usedBy: playerIndex,
@@ -496,37 +633,41 @@ io.on("connection", (socket: Socket) => {
           revealedTiles: allTiles,
           allRevealedTiles: room.revealedTiles,
           points: room.points,
+          currentTurn: room.currentTurn,
           message: `${room.players[playerIndex].name} nuked the image!`,
         });
         break;
     }
 
-    gameRooms.set(roomId, room);
+    // Update room in DynamoDB
+    await updateGameRoom(room);
     callback(true);
   });
 
   // Handle disconnection
-  socket.on("disconnect", () => {
+  socket.on("disconnect", async () => {
     console.log(`User disconnected: ${socket.id}`);
 
-    // Find and clean up rooms where this player was
-    Array.from(gameRooms.entries()).forEach(([roomId, room]) => {
+    // Find and clean up rooms where this player was in DynamoDB
+    const activeRooms = await getActiveGameRooms();
+    
+    for (const room of activeRooms) {
       const playerIndex = room.players.findIndex((p: Player) => p.socketId === socket.id);
       
       if (playerIndex !== -1) {
         // Notify other player
-        io.to(roomId).emit("player-disconnected", {
+        io.to(room.roomId).emit("player-disconnected", {
           playerIndex,
           message: "Opponent disconnected",
         });
 
         // Remove room after a delay to allow reconnection
-        setTimeout(() => {
-          gameRooms.delete(roomId);
-          console.log(`Room ${roomId} deleted after player disconnect`);
+        setTimeout(async () => {
+          await deleteGameRoom(room.roomId);
+          console.log(`🗑️  Room ${room.roomId} deleted from DynamoDB after player disconnect`);
         }, 30000); // 30 seconds grace period
       }
-    });
+    }
   });
 });
 

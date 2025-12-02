@@ -1,7 +1,5 @@
 "use client";
 
-import Icon from "./Icon";
-
 interface GameStatusProps {
   isMyTurn: boolean;
   opponentConnected: boolean;
@@ -26,22 +24,19 @@ export default function GameStatus({
       return {
         text: 'Waiting for opponent to join...',
         color: 'text-yellow-600 dark:text-yellow-400',
-        icon: 'hourglass',
       };
     }
 
     if (gameState === 'finished') {
       if (winner === playerIndex) {
         return {
-          text: `${myName} Won! 🎉`,
+          text: `${myName} Won!`,
           color: 'text-green-600 dark:text-green-400',
-          icon: 'trophy',
         };
       } else {
         return {
           text: `${opponentName} Won!`,
           color: 'text-red-600 dark:text-red-400',
-          icon: 'sad',
         };
       }
     }
@@ -50,7 +45,6 @@ export default function GameStatus({
       return {
         text: `${opponentName} disconnected`,
         color: 'text-red-600 dark:text-red-400',
-        icon: 'alert',
       };
     }
 
@@ -58,14 +52,12 @@ export default function GameStatus({
       return {
         text: `${myName}'s Turn - Click a tile!`,
         color: 'text-blue-600 dark:text-blue-400 animate-pulse',
-        icon: 'pointer',
       };
     }
 
     return {
       text: `${opponentName}'s Turn`,
       color: 'text-gray-600 dark:text-gray-400',
-      icon: 'clock',
     };
   };
 
@@ -73,8 +65,7 @@ export default function GameStatus({
 
   return (
     <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 mb-6">
-      <div className="flex items-center justify-center space-x-3">
-        <Icon name={status.icon} size={32} className={status.color} />
+      <div className="flex items-center justify-center">
         <h2 className={`text-2xl font-bold ${status.color}`}>
           {status.text}
         </h2>

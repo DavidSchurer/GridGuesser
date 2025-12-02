@@ -4,7 +4,7 @@ import { useState } from "react";
 import Image from "next/image";
 
 interface GameGridProps {
-  imageId: string;
+  imageHash: string; // Changed from imageId to imageHash
   revealedTiles: number[];
   isMyTurn: boolean;
   isOpponentGrid: boolean;
@@ -14,7 +14,7 @@ interface GameGridProps {
 }
 
 export default function GameGrid({
-  imageId,
+  imageHash,
   revealedTiles,
   isMyTurn,
   isOpponentGrid,
@@ -87,17 +87,10 @@ export default function GameGrid({
     }
   };
 
-  const getTileImage = (tileIndex: number) => {
-    // In production, these would be pre-generated tiles
-    // For MVP, we'll use a simple approach with CSS
-    const row = Math.floor(tileIndex / 10);
-    const col = tileIndex % 10;
-    
-    return {
-      backgroundImage: `url(/images/${imageId}.jpg)`,
-      backgroundSize: '1000%',
-      backgroundPosition: `${col * 11.111}% ${row * 11.111}%`,
-    };
+  // Get tile URL from server - only individual tiles are served
+  const getTileUrl = (tileIndex: number): string => {
+    // API endpoint that serves individual tiles based on imageHash
+    return `http://localhost:3001/api/tiles/${imageHash}/${tileIndex}`;
   };
 
   return (
@@ -131,9 +124,13 @@ export default function GameGrid({
               `}
             >
               {isRevealed ? (
-                <div
-                  className="tile-image animate-fade-in"
-                  style={getTileImage(index)}
+                <Image
+                  src={getTileUrl(index)}
+                  alt={`Tile ${index + 1}`}
+                  width={100}
+                  height={100}
+                  className="tile-image animate-fade-in w-full h-full object-cover"
+                  unoptimized
                 />
               ) : (
                 <div className="w-full h-full flex items-center justify-center text-gray-400 dark:text-gray-600 text-xs font-mono">

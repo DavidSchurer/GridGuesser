@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import UserProfile from "../components/UserProfile";
+import CategorySelector from "../components/CategorySelector";
 import { useAuth } from "../lib/authContext";
 
 export default function Home() {
@@ -10,12 +11,19 @@ export default function Home() {
   const [playerName, setPlayerName] = useState("");
   const [isCreating, setIsCreating] = useState(false);
   const [showNameInput, setShowNameInput] = useState(false);
+  const [showCategorySelection, setShowCategorySelection] = useState(false);
+  const [selectedCategory, setSelectedCategory] = useState("landmarks");
   const [action, setAction] = useState<'create' | 'join' | null>(null);
   const router = useRouter();
   const { user } = useAuth();
 
   const handleCreateClick = () => {
     setAction('create');
+    setShowCategorySelection(true);
+  };
+
+  const handleCategorySelected = () => {
+    setShowCategorySelection(false);
     setShowNameInput(true);
   };
 
@@ -32,22 +40,26 @@ export default function Home() {
     
     if (!user && playerName.trim().length === 0) return;
     
-    // Store name in sessionStorage
-    sessionStorage.setItem('playerName', finalName);
-    
+    // Pass data via URL query params instead of sessionStorage
     if (action === 'create') {
       setIsCreating(true);
       const code = Math.floor(100000 + Math.random() * 900000).toString();
-      router.push(`/game/${code}`);
+      router.push(`/game/${code}?name=${encodeURIComponent(finalName)}&category=${encodeURIComponent(selectedCategory)}`);
     } else if (action === 'join') {
-      router.push(`/game/${roomCode}`);
+      router.push(`/game/${roomCode}?name=${encodeURIComponent(finalName)}`);
     }
   };
 
   const handleBackToMain = () => {
     setShowNameInput(false);
+    setShowCategorySelection(false);
     setAction(null);
     setPlayerName("");
+  };
+
+  const handleBackFromName = () => {
+    setShowNameInput(false);
+    setShowCategorySelection(true);
   };
 
   return (
@@ -67,11 +79,42 @@ export default function Home() {
         </div>
 
         <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl p-8 space-y-6">
-          {showNameInput ? (
-            /* Name Input Screen */
+          {showCategorySelection ? (
+            /* Category Selection Screen */
             <div className="space-y-6 animate-slide-up">
               <button
                 onClick={handleBackToMain}
+                className="text-sm text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 flex items-center gap-1"
+              >
+                ← Back
+              </button>
+              
+              <div>
+                <h2 className="text-2xl font-semibold text-gray-800 dark:text-gray-100 mb-2">
+                  Choose a Category
+                </h2>
+                <p className="text-sm text-gray-600 dark:text-gray-400 mb-6">
+                  Images will be fetched from this category for your game
+                </p>
+                
+                <CategorySelector
+                  selectedCategory={selectedCategory}
+                  onCategoryChange={setSelectedCategory}
+                />
+                
+                <button
+                  onClick={handleCategorySelected}
+                  className="w-full mt-6 py-4 px-6 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white rounded-xl font-semibold text-lg transition-all duration-200 transform hover:scale-105"
+                >
+                  Continue
+                </button>
+              </div>
+            </div>
+          ) : showNameInput ? (
+            /* Name Input Screen */
+            <div className="space-y-6 animate-slide-up">
+              <button
+                onClick={action === 'create' ? handleBackFromName : handleBackToMain}
                 className="text-sm text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 flex items-center gap-1"
               >
                 ← Back

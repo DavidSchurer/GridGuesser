@@ -1,7 +1,5 @@
 "use client";
 
-import Icon from "./Icon";
-
 interface PlayerInfoProps {
   playerName: string;
   points: number;
@@ -44,19 +42,19 @@ export default function PlayerInfo({
             </span>
           )}
         </div>
-        <div className={`text-sm flex items-center gap-1 ${isActive ? 'text-white/90' : 'text-gray-600 dark:text-gray-400'}`}>
-          <Icon name="target" size={14} />
+        <div className={`text-sm ${isActive ? 'text-white/90' : 'text-gray-600 dark:text-gray-400'}`}>
           <span className="font-semibold">{points}</span> points
         </div>
       </div>
 
       {isActive && (
         <div className="animate-pulse">
-          <Icon name="pointer" size={24} className="text-white" />
+          <span className="text-2xl">▶</span>
         </div>
       )}
     </div>
   );
 }
+
 
 

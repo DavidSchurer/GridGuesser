@@ -1,3 +1,10 @@
+// Load environment variables first
+import dotenv from "dotenv";
+import path from "path";
+if (typeof __dirname !== 'undefined') {
+  dotenv.config({ path: path.join(__dirname, '../.env.local') });
+}
+
 import { docClient, TABLES, PutCommand, GetCommand, UpdateCommand, QueryCommand } from "./dynamodb";
 import { User, UserStats, UserSettings } from "./types";
 import { randomUUID } from "crypto";

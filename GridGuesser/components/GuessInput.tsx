@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import Icon from "./Icon";
 
 interface GuessInputProps {
   onSubmitGuess: (guess: string) => void;
@@ -67,8 +66,7 @@ export default function GuessInput({
             </button>
           </div>
         </div>
-        <p className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1">
-          <Icon name="lightbulb" size={14} className="text-yellow-500" />
+        <p className="text-xs text-gray-500 dark:text-gray-400">
           Tip: Be specific! Include key details of what you see.
         </p>
       </form>

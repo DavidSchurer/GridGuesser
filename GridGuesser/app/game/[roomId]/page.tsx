@@ -4,6 +4,7 @@ import { useEffect, useState, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { connectSocket, disconnectSocket } from "@/lib/socket";
 import { useGameStore } from "@/lib/gameStore";
+import { useAuth } from "@/lib/authContext";
 import { GameRoom } from "@/lib/types";
 import GameGrid from "@/components/GameGrid";
 import GameStatus from "@/components/GameStatus";
@@ -17,6 +18,7 @@ export default function GameRoomPage() {
   const params = useParams();
   const router = useRouter();
   const roomId = params.roomId as string;
+  const { refreshProfile } = useAuth();
 
   const {
     playerIndex,
@@ -44,17 +46,20 @@ export default function GameRoomPage() {
     setSocket(socketInstance);
     setRoomId(roomId);
 
-    // Get player name from sessionStorage
-    const playerName = sessionStorage.getItem('playerName') || 'Player';
+    // Get player name and category from URL query params or use defaults
+    const searchParams = new URLSearchParams(window.location.search);
+    const playerName = searchParams.get('name') || 'Player';
+    const selectedCategory = searchParams.get('category') || 'landmarks';
 
     // Try to create the room with the specific roomId
     // First check if room exists
     socketInstance.emit("get-game-state", roomId, (room: GameRoom | null) => {
       if (!room) {
         // Room doesn't exist, create it with this roomId
-        socketInstance.emit("create-room-with-id", { roomId, playerName }, (success: boolean, errorMsg?: string) => {
+        socketInstance.emit("create-room-with-id", { roomId, playerName, category: selectedCategory }, (success: boolean, errorMsg?: string) => {
           if (success) {
             setPlayerIndex(0);
+            console.log(`✅ Room created with category: ${selectedCategory}`);
             // Fetch the newly created room state
             socketInstance.emit("get-game-state", roomId, (newRoom: GameRoom | null) => {
               if (newRoom) {
@@ -67,6 +72,7 @@ export default function GameRoomPage() {
         });
       } else if (room.gameState === 'waiting' && room.players.length === 1) {
         // Room exists with one player, join as second player
+        console.log(`🎮 Joining room with category: ${room.category || 'unknown'}`);
         socketInstance.emit("join-room", { roomId, playerName }, (success: boolean, index?: 0 | 1, errorMsg?: string) => {
           if (success && index !== undefined) {
             setPlayerIndex(index);
@@ -101,12 +107,29 @@ export default function GameRoomPage() {
     socketInstance.on("tile-revealed", (data: { tileIndex: number; playerIndex: number; revealedBy: number; currentTurn: 0 | 1; imageId: string; points?: [number, number] }) => {
       setLastRevealedTile(data.tileIndex);
       
-      // Update game state
-      socketInstance.emit("get-game-state", roomId, (room: GameRoom | null) => {
-        if (room) {
-          setGameRoom(room);
+      // Immediately update local game state
+      const currentRoom = useGameStore.getState().gameRoom;
+      if (currentRoom) {
+        const updatedRevealedTiles = [...currentRoom.revealedTiles] as [number[], number[]];
+        if (!updatedRevealedTiles[data.playerIndex].includes(data.tileIndex)) {
+          updatedRevealedTiles[data.playerIndex] = [...updatedRevealedTiles[data.playerIndex], data.tileIndex];
         }
-      });
+        setGameRoom({
+          ...currentRoom,
+          revealedTiles: updatedRevealedTiles,
+          currentTurn: data.currentTurn,
+          points: data.points || currentRoom.points,
+        });
+      }
+      
+      // Also fetch fresh game state to ensure synchronization
+      setTimeout(() => {
+        socketInstance.emit("get-game-state", roomId, (room: GameRoom | null) => {
+          if (room) {
+            setGameRoom(room);
+          }
+        });
+      }, 100);
 
       // Show notification for opponent's move
       if (data.revealedBy !== playerIndex) {
@@ -115,15 +138,30 @@ export default function GameRoomPage() {
     });
 
     // Listen for power-up usage
-    socketInstance.on("power-up-used", (data: { powerUpId: string; usedBy: number; message: string; points: [number, number]; allRevealedTiles?: [number[], number[]] }) => {
+    socketInstance.on("power-up-used", (data: { powerUpId: string; usedBy: number; message: string; points: [number, number]; allRevealedTiles?: [number[], number[]]; currentTurn?: 0 | 1 }) => {
       showNotification(data.message);
       
-      // Update game state
-      socketInstance.emit("get-game-state", roomId, (room: GameRoom | null) => {
-        if (room) {
-          setGameRoom(room);
+      // Immediately update local game state with the revealed tiles
+      if (data.allRevealedTiles) {
+        const currentRoom = useGameStore.getState().gameRoom;
+        if (currentRoom) {
+          setGameRoom({
+            ...currentRoom,
+            revealedTiles: data.allRevealedTiles,
+            points: data.points,
+            currentTurn: data.currentTurn !== undefined ? data.currentTurn : currentRoom.currentTurn,
+          });
         }
-      });
+      }
+      
+      // Also fetch fresh game state to ensure synchronization
+      setTimeout(() => {
+        socketInstance.emit("get-game-state", roomId, (room: GameRoom | null) => {
+          if (room) {
+            setGameRoom(room);
+          }
+        });
+      }, 100);
     });
 
     // Listen for wrong guesses
@@ -156,6 +194,9 @@ export default function GameRoomPage() {
           setGameRoom(room);
         }
       });
+
+      // Refresh user profile to get updated stats
+      refreshProfile().catch(error => console.error("Error refreshing profile:", error));
     });
 
     // Listen for player disconnection
@@ -247,8 +288,8 @@ export default function GameRoomPage() {
   }
 
   const isMyTurn = gameRoom.currentTurn === playerIndex;
-  const myImageId = gameRoom.images[playerIndex];
-  const opponentImageId = gameRoom.images[1 - playerIndex];
+  const myImageHash = gameRoom.imageHashes[playerIndex];
+  const opponentImageHash = gameRoom.imageHashes[1 - playerIndex];
   const myRevealedTiles = gameRoom.revealedTiles[playerIndex];
   const opponentRevealedTiles = gameRoom.revealedTiles[1 - playerIndex];
   const myPoints = gameRoom.points[playerIndex];
@@ -323,7 +364,7 @@ export default function GameRoomPage() {
               <Icon name="target" size={24} className="text-red-500" />
             </h3>
             <GameGrid
-              imageId={opponentImageId}
+              imageHash={opponentImageHash}
               revealedTiles={opponentRevealedTiles}
               isMyTurn={isMyTurn}
               isOpponentGrid={true}
@@ -340,7 +381,7 @@ export default function GameRoomPage() {
               <Icon name="image" size={24} className="text-purple-500" />
             </h3>
             <GameGrid
-              imageId={myImageId}
+              imageHash={myImageHash}
               revealedTiles={myRevealedTiles}
               isMyTurn={false}
               isOpponentGrid={false}

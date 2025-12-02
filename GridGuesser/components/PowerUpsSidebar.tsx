@@ -32,14 +32,14 @@ const powerUps: PowerUp[] = [
     name: 'Reveal 2x2',
     cost: 8,
     description: 'Reveal a 2x2 area on opponent\'s grid',
-    icon: 'target',
+    icon: 'grid2x2',
   },
   {
     id: 'nuke',
     name: 'Nuke',
     cost: 15,
     description: 'Reveal the entire opponent\'s image',
-    icon: 'alert',
+    icon: 'nuke',
   },
 ];
 
@@ -75,8 +75,7 @@ export default function PowerUpsSidebar({
     <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 space-y-6">
       {/* Header */}
       <div className="border-b border-gray-200 dark:border-gray-700 pb-4">
-        <h2 className="text-2xl font-bold text-gray-800 dark:text-gray-100 flex items-center gap-2">
-          <Icon name="gamepad" size={28} className="text-purple-500" />
+        <h2 className="text-2xl font-bold text-gray-800 dark:text-gray-100">
           Power-Ups
         </h2>
       </div>
@@ -84,8 +83,7 @@ export default function PowerUpsSidebar({
       {/* Turn Indicator */}
       {!isMyTurn && !disabled && (
         <div className="bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg p-3">
-          <p className="text-sm text-gray-600 dark:text-gray-400 text-center flex items-center justify-center gap-2">
-            <Icon name="clock" size={18} className="text-gray-500" />
+          <p className="text-sm text-gray-600 dark:text-gray-400 text-center">
             Power-ups available on your turn
           </p>
         </div>
@@ -112,27 +110,24 @@ export default function PowerUpsSidebar({
       {/* Instructions */}
       {showInstructions && selectedPowerUp === 'reveal2x2' && (
         <div className="bg-purple-100 dark:bg-purple-900 border-2 border-purple-400 dark:border-purple-600 rounded-lg p-4 animate-fade-in">
-          <div className="flex items-start gap-2">
-            <Icon name="target" size={24} className="text-purple-600 dark:text-purple-400 flex-shrink-0 mt-0.5" />
-            <div>
-              <p className="text-sm text-purple-900 dark:text-purple-100 font-bold mb-1">
-                2x2 Reveal Mode Active!
-              </p>
-              <p className="text-xs text-purple-800 dark:text-purple-200 mb-2">
-                Hover over the opponent's grid to see the 2x2 area. Click anywhere to reveal all 4 tiles!
-              </p>
-              <button
-                onClick={() => {
-                  setSelectedPowerUp(null);
-                  setShowInstructions(false);
-                  // Notify parent to exit 2x2 mode
-                  onUsePowerUp('cancel' as any);
-                }}
-                className="text-xs text-purple-700 dark:text-purple-300 bg-purple-200 dark:bg-purple-800 px-2 py-1 rounded hover:bg-purple-300 dark:hover:bg-purple-700 transition-colors"
-              >
-                Cancel
-              </button>
-            </div>
+          <div>
+            <p className="text-sm text-purple-900 dark:text-purple-100 font-bold mb-1">
+              2x2 Reveal Mode Active!
+            </p>
+            <p className="text-xs text-purple-800 dark:text-purple-200 mb-2">
+              Hover over the opponent's grid to see the 2x2 area. Click anywhere to reveal all 4 tiles!
+            </p>
+            <button
+              onClick={() => {
+                setSelectedPowerUp(null);
+                setShowInstructions(false);
+                // Notify parent to exit 2x2 mode
+                onUsePowerUp('cancel' as any);
+              }}
+              className="text-xs text-purple-700 dark:text-purple-300 bg-purple-200 dark:bg-purple-800 px-2 py-1 rounded hover:bg-purple-300 dark:hover:bg-purple-700 transition-colors"
+            >
+              Cancel
+            </button>
           </div>
         </div>
       )}
@@ -189,8 +184,7 @@ export default function PowerUpsSidebar({
 
       {/* Info Footer */}
       <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
-        <p className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1">
-          <Icon name="lightbulb" size={14} className="text-yellow-500" />
+        <p className="text-xs text-gray-500 dark:text-gray-400">
           Earn points by revealing tiles on opponent's grid!
         </p>
       </div>

@@ -11,11 +11,23 @@ export interface GameRoom {
   currentTurn: 0 | 1;
   gameState: 'waiting' | 'playing' | 'finished';
   revealedTiles: [number[], number[]]; // tile indices for each player
-  images: [string, string]; // assigned image IDs
+  images: [string, string]; // assigned image URLs (original URLs, not sent to client)
+  imageHashes: [string, string]; // MD5 hashes of images for tile access
   imageNames: [string, string]; // names for guess validation
   points: [number, number]; // points for each player
   winner?: 0 | 1;
   createdAt: number;
+  category?: string; // selected category for image fetching
+  imageMetadata?: [DynamicImageMetadata | null, DynamicImageMetadata | null]; // full image data
+  skipTurnActive?: boolean; // if true, current player gets an extra turn
+}
+
+export interface DynamicImageMetadata {
+  url: string;
+  thumbnailUrl: string;
+  title: string;
+  searchTerm: string;
+  category: string;
 }
 
 export interface ImageMetadata {

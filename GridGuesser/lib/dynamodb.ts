@@ -1,3 +1,12 @@
+// Load environment variables FIRST before anything else
+import dotenv from "dotenv";
+import path from "path";
+
+// Load .env.local from the project root
+if (typeof __dirname !== 'undefined') {
+  dotenv.config({ path: path.join(__dirname, '../.env.local') });
+}
+
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import {
   DynamoDBDocumentClient,
@@ -8,7 +17,7 @@ import {
   ScanCommand,
 } from "@aws-sdk/lib-dynamodb";
 
-// Initialize DynamoDB Client
+// Initialize DynamoDB Client (now env vars are loaded)
 const client = new DynamoDBClient({
   region: process.env.AWS_REGION || "us-east-1",
   credentials: {
@@ -27,6 +36,7 @@ export const docClient = DynamoDBDocumentClient.from(client, {
 // Table names from environment variables
 export const TABLES = {
   USERS: process.env.DYNAMODB_USERS_TABLE || "GridGuesser-Users",
+  GAME_ROOMS: process.env.DYNAMODB_GAME_ROOMS_TABLE || "GridGuesser-GameRooms",
 };
 
 // Helper function to check if DynamoDB is configured
@@ -93,6 +103,45 @@ export async function ensureTablesExist() {
       await new Promise(resolve => setTimeout(resolve, 10000));
     } else {
       console.log(`✅ Table already exists: ${TABLES.USERS}`);
+    }
+    
+    // Create GameRooms table if it doesn't exist
+    if (!TableNames?.includes(TABLES.GAME_ROOMS)) {
+      const createGameRoomsTable = new CreateTableCommand({
+        TableName: TABLES.GAME_ROOMS,
+        KeySchema: [
+          { AttributeName: "roomId", KeyType: "HASH" }, // Partition key
+        ],
+        AttributeDefinitions: [
+          { AttributeName: "roomId", AttributeType: "S" },
+        ],
+        BillingMode: "PROVISIONED",
+        ProvisionedThroughput: {
+          ReadCapacityUnits: 5,
+          WriteCapacityUnits: 5,
+        },
+      });
+      
+      await client.send(createGameRoomsTable);
+      console.log(`✅ Created table: ${TABLES.GAME_ROOMS}`);
+      
+      // Wait for table to be active
+      await new Promise(resolve => setTimeout(resolve, 10000));
+      
+      // Enable TTL for automatic cleanup (must be done after table creation)
+      const { UpdateTimeToLiveCommand } = await import("@aws-sdk/client-dynamodb");
+      const enableTTL = new UpdateTimeToLiveCommand({
+        TableName: TABLES.GAME_ROOMS,
+        TimeToLiveSpecification: {
+          Enabled: true,
+          AttributeName: "ttl"
+        }
+      });
+      
+      await client.send(enableTTL);
+      console.log(`✅ Enabled TTL on table: ${TABLES.GAME_ROOMS}`);
+    } else {
+      console.log(`✅ Table already exists: ${TABLES.GAME_ROOMS}`);
     }
     
     return true;
