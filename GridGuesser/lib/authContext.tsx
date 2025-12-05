@@ -29,20 +29,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Load user from server on mount (checks cookie)
-  useEffect(() => {
-    verifySession()
-      .then((valid) => {
-        if (!valid) {
-          setUser(null);
-          setToken(null);
-        }
-      })
-      .finally(() => {
-        setLoading(false);
-      });
-  }, []);
-
   const verifySession = async (): Promise<boolean> => {
     try {
       const response = await fetch(`${API_URL}/auth/verify`, {
@@ -66,6 +52,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return false;
     }
   };
+
+  // Load user from server on mount (checks cookie)
+  useEffect(() => {
+    verifySession()
+      .then((valid) => {
+        if (!valid) {
+          setUser(null);
+          setToken(null);
+        }
+      })
+      .finally(() => {
+        setLoading(false);
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const login = async (email: string, password: string) => {
     try {

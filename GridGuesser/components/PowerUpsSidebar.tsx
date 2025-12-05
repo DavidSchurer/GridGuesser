@@ -115,7 +115,7 @@ export default function PowerUpsSidebar({
               2x2 Reveal Mode Active!
             </p>
             <p className="text-xs text-purple-800 dark:text-purple-200 mb-2">
-              Hover over the opponent's grid to see the 2x2 area. Click anywhere to reveal all 4 tiles!
+              Hover over the opponent&apos;s grid to see the 2x2 area. Click anywhere to reveal all 4 tiles!
             </p>
             <button
               onClick={() => {
@@ -185,7 +185,7 @@ export default function PowerUpsSidebar({
       {/* Info Footer */}
       <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
         <p className="text-xs text-gray-500 dark:text-gray-400">
-          Earn points by revealing tiles on opponent's grid!
+          Earn points by revealing tiles on opponent&apos;s grid!
         </p>
       </div>
     </div>

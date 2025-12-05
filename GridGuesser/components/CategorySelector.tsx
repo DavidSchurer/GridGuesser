@@ -124,7 +124,7 @@ export default function CategorySelector({
         />
         {selectedCategory === 'custom' && localCustomQuery.trim().length > 0 && (
           <p className="text-xs text-blue-600 dark:text-blue-400 mt-2">
-            ✓ Custom category selected: "{localCustomQuery}"
+            ✓ Custom category selected: &quot;{localCustomQuery}&quot;
           </p>
         )}
       </div>

@@ -216,8 +216,8 @@ export default function Home() {
             </h3>
             <ul className="space-y-2 text-gray-600 dark:text-gray-400 text-sm">
               <li>• Each player gets a hidden 10x10 grid image</li>
-              <li>• Take turns revealing tiles from your opponent's grid</li>
-              <li>• First to correctly guess the opponent's image wins!</li>
+              <li>• Take turns revealing tiles from your opponent&apos;s grid</li>
+              <li>• First to correctly guess the opponent&apos;s image wins!</li>
             </ul>
           </div>
           </>
