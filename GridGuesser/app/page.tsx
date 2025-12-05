@@ -13,6 +13,7 @@ export default function Home() {
   const [showNameInput, setShowNameInput] = useState(false);
   const [showCategorySelection, setShowCategorySelection] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState("landmarks");
+  const [customQuery, setCustomQuery] = useState("");
   const [action, setAction] = useState<'create' | 'join' | null>(null);
   const router = useRouter();
   const { user } = useAuth();
@@ -44,7 +45,14 @@ export default function Home() {
     if (action === 'create') {
       setIsCreating(true);
       const code = Math.floor(100000 + Math.random() * 900000).toString();
-      router.push(`/game/${code}?name=${encodeURIComponent(finalName)}&category=${encodeURIComponent(selectedCategory)}`);
+      
+      // If custom category is selected, pass the custom query
+      let url = `/game/${code}?name=${encodeURIComponent(finalName)}&category=${encodeURIComponent(selectedCategory)}`;
+      if (selectedCategory === 'custom' && customQuery.trim()) {
+        url += `&customQuery=${encodeURIComponent(customQuery.trim())}`;
+      }
+      
+      router.push(url);
     } else if (action === 'join') {
       router.push(`/game/${roomCode}?name=${encodeURIComponent(finalName)}`);
     }
@@ -100,11 +108,14 @@ export default function Home() {
                 <CategorySelector
                   selectedCategory={selectedCategory}
                   onCategoryChange={setSelectedCategory}
+                  customQuery={customQuery}
+                  onCustomQueryChange={setCustomQuery}
                 />
                 
                 <button
                   onClick={handleCategorySelected}
-                  className="w-full mt-6 py-4 px-6 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white rounded-xl font-semibold text-lg transition-all duration-200 transform hover:scale-105"
+                  disabled={selectedCategory === 'custom' && customQuery.trim().length === 0}
+                  className="w-full mt-6 py-4 px-6 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white rounded-xl font-semibold text-lg transition-all duration-200 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
                 >
                   Continue
                 </button>

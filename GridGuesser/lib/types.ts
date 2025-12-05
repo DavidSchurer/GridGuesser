@@ -18,6 +18,7 @@ export interface GameRoom {
   winner?: 0 | 1;
   createdAt: number;
   category?: string; // selected category for image fetching
+  customQuery?: string; // custom search query when category is 'custom'
   imageMetadata?: [DynamicImageMetadata | null, DynamicImageMetadata | null]; // full image data
   skipTurnActive?: boolean; // if true, current player gets an extra turn
 }

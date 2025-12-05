@@ -17,7 +17,8 @@ export async function createGameRoom(
   roomId: string,
   creatorUserId: string | undefined,
   creatorName: string,
-  category: string
+  category: string,
+  customQuery?: string
 ): Promise<{ success: boolean; room?: GameRoom; error?: string }> {
   try {
     const now = Date.now();
@@ -39,6 +40,7 @@ export async function createGameRoom(
       points: [0, 0],
       createdAt: now,
       category,
+      customQuery, // Store custom query if provided
       imageMetadata: [null, null],
       skipTurnActive: false,
     };
@@ -145,7 +147,7 @@ export async function addPlayerToRoom(
   }
 }
 
-// Update game state and images
+// Update game state and images (with retry logic for failed downloads)
 export async function updateGameImages(
   roomId: string,
   imageMetadata: [DynamicImageMetadata | null, DynamicImageMetadata | null]
@@ -169,8 +171,10 @@ export async function updateGameImages(
     ]);
 
     if (!tiles1Result.success || !tiles2Result.success) {
-      console.error("Failed to generate tiles");
-      return { success: false, error: "Failed to generate image tiles" };
+      console.error("Failed to generate tiles - one or more images failed to download");
+      console.error(`Image 1 (${imageMetadata[0]?.title}): ${tiles1Result.success ? 'SUCCESS' : 'FAILED'}`);
+      console.error(`Image 2 (${imageMetadata[1]?.title}): ${tiles2Result.success ? 'SUCCESS' : 'FAILED'}`);
+      return { success: false, error: "Failed to generate image tiles - images may be protected or unavailable" };
     }
 
     room.images = [image1Url, image2Url];
@@ -182,7 +186,8 @@ export async function updateGameImages(
     room.imageMetadata = imageMetadata;
     room.gameState = "playing";
 
-    console.log(`Tiles generated: ${tiles1Result.imageHash}, ${tiles2Result.imageHash}`);
+    console.log(`✅ Tiles generated successfully: ${tiles1Result.imageHash}, ${tiles2Result.imageHash}`);
+    console.log(`✅ Game ready with answers: "${room.imageNames[0]}" and "${room.imageNames[1]}"`);
     return await updateGameRoom(room);
   } catch (error) {
     console.error("Error updating game images:", error);

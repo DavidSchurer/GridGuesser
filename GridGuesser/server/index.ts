@@ -215,8 +215,8 @@ io.on("connection", (socket: Socket) => {
   });
 
   // Create a room with a specific ID
-  socket.on("create-room-with-id", async (data: { roomId: string; playerName: string; category?: string }, callback: (success: boolean, error?: string) => void) => {
-    const { roomId, playerName, category } = data;
+  socket.on("create-room-with-id", async (data: { roomId: string; playerName: string; category?: string; customQuery?: string }, callback: (success: boolean, error?: string) => void) => {
+    const { roomId, playerName, category, customQuery } = data;
     
     // Check if room already exists in DynamoDB
     const existingRoom = await getGameRoom(roomId);
@@ -234,7 +234,7 @@ io.on("connection", (socket: Socket) => {
     }
     
     // Create room in DynamoDB
-    const result = await createGameRoom(roomId, userId, finalPlayerName, selectedCategory);
+    const result = await createGameRoom(roomId, userId, finalPlayerName, selectedCategory, customQuery);
     
     if (!result.success) {
       callback(false, result.error || "Failed to create room");
@@ -246,7 +246,8 @@ io.on("connection", (socket: Socket) => {
     
     socket.join(roomId);
     
-    console.log(`Room created in DynamoDB with ID: ${roomId} by ${username || 'Guest'} (${socket.id}) with category: ${selectedCategory}`);
+    const categoryInfo = customQuery ? `custom: "${customQuery}"` : selectedCategory;
+    console.log(`Room created in DynamoDB with ID: ${roomId} by ${username || 'Guest'} (${socket.id}) with category: ${categoryInfo}`);
     callback(true);
   });
 
@@ -283,19 +284,51 @@ io.on("connection", (socket: Socket) => {
     socket.join(roomId);
 
     // Fetch images based on selected category
-    const category = (addPlayerResult.room.category || 'landmarks') as CategoryKey;
+    const category = addPlayerResult.room.category || 'landmarks';
+    const customQuery = addPlayerResult.room.customQuery;
     
     try {
-      const [image1, image2] = await fetchTwoImagesForGame(category);
+      let image1, image2;
+      let updateResult;
+      let retryCount = 0;
+      const maxRetries = 3;
       
-      if (image1 && image2) {
-        // Successfully fetched images from Google API - store in DynamoDB
-        await updateGameImages(roomId, [image1, image2]);
-        console.log(`Fetched and stored images in DynamoDB: "${image1.title}" and "${image2.title}"`);
+      // Retry loop for fetching images (in case of 403 errors)
+      while (retryCount < maxRetries) {
+        // Use custom query if category is 'custom'
+        if (category === 'custom' && customQuery) {
+          const { fetchTwoImagesForCustomGame } = await import("../lib/googleImagesApi");
+          [image1, image2] = await fetchTwoImagesForCustomGame(customQuery);
+          console.log(`Attempt ${retryCount + 1}: Fetching images with custom query: "${customQuery}"`);
+        } else {
+          [image1, image2] = await fetchTwoImagesForGame(category as CategoryKey);
+        }
         
+        if (image1 && image2) {
+          // Try to store images and generate tiles
+          updateResult = await updateGameImages(roomId, [image1, image2]);
+          
+          if (updateResult.success) {
+            // Success! Break out of retry loop
+            const queryInfo = customQuery ? `custom query "${customQuery}"` : `category "${category}"`;
+            console.log(`✅ Images successfully stored from ${queryInfo}: "${image1.title}" and "${image2.title}"`);
+            break;
+          } else {
+            // Tile generation failed (likely 403 error), retry with different images
+            console.log(`⚠️  Attempt ${retryCount + 1} failed: ${updateResult.error}. Retrying...`);
+            retryCount++;
+          }
+        } else {
+          console.log(`⚠️  Failed to fetch images on attempt ${retryCount + 1}`);
+          retryCount++;
+        }
+      }
+      
+      // Check if we succeeded or need to use fallback
+      if (updateResult && updateResult.success) {
         // Get updated room from DynamoDB
         const updatedRoom = await getGameRoom(roomId);
-        if (updatedRoom) {
+        if (updatedRoom && updatedRoom.gameState === "playing") {
           // Notify both players that the game is starting
           // DO NOT send full image URLs - only send imageHashes for tile access
           io.to(roomId).emit("game-start", {
@@ -305,10 +338,11 @@ io.on("connection", (socket: Socket) => {
             imageHashes: updatedRoom.imageHashes, // Only send hashes, not full URLs
             category: updatedRoom.category,
           });
+          console.log(`✅ Game started for room ${roomId}`);
         }
       } else {
-        // Fallback to static images
-        console.log('WARNING: Google API failed, using static images');
+        // All retries failed - Fallback to static images
+        console.log('⚠️  All retries failed. Using static images as fallback.');
         const [fallbackImage1, fallbackImage2] = getTwoRandomImages();
         
         addPlayerResult.room.images = [fallbackImage1.id, fallbackImage2.id];
@@ -323,6 +357,7 @@ io.on("connection", (socket: Socket) => {
           images: addPlayerResult.room.images,
           category: addPlayerResult.room.category,
         });
+        console.log(`✅ Game started with fallback images for room ${roomId}`);
       }
 
       console.log(`Player joined room ${roomId}: ${username || 'Guest'} (${socket.id})`);

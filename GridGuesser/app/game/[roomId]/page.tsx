@@ -50,16 +50,24 @@ export default function GameRoomPage() {
     const searchParams = new URLSearchParams(window.location.search);
     const playerName = searchParams.get('name') || 'Player';
     const selectedCategory = searchParams.get('category') || 'landmarks';
+    const customQuery = searchParams.get('customQuery') || '';
 
     // Try to create the room with the specific roomId
     // First check if room exists
     socketInstance.emit("get-game-state", roomId, (room: GameRoom | null) => {
       if (!room) {
         // Room doesn't exist, create it with this roomId
-        socketInstance.emit("create-room-with-id", { roomId, playerName, category: selectedCategory }, (success: boolean, errorMsg?: string) => {
+        const roomData = { 
+          roomId, 
+          playerName, 
+          category: selectedCategory,
+          ...(customQuery && { customQuery })
+        };
+        
+        socketInstance.emit("create-room-with-id", roomData, (success: boolean, errorMsg?: string) => {
           if (success) {
             setPlayerIndex(0);
-            console.log(`✅ Room created with category: ${selectedCategory}`);
+            console.log(`✅ Room created with category: ${selectedCategory}${customQuery ? ` (custom: "${customQuery}")` : ''}`);
             // Fetch the newly created room state
             socketInstance.emit("get-game-state", roomId, (newRoom: GameRoom | null) => {
               if (newRoom) {

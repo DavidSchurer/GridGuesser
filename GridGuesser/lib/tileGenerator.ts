@@ -19,12 +19,28 @@ function generateImageHash(imageUrl: string): string {
   return createHash('md5').update(imageUrl).digest('hex');
 }
 
-// Download image from URL
+// Download image from URL with proper headers and redirect handling
 async function downloadImage(url: string): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const client = url.startsWith('https') ? https : http;
     
-    client.get(url, (response) => {
+    const options = {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Referer': 'https://www.google.com/',
+      }
+    };
+    
+    client.get(url, options, (response) => {
+      // Handle redirects (301, 302, 307, 308)
+      if (response.statusCode && response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+        console.log(`Following redirect to: ${response.headers.location}`);
+        downloadImage(response.headers.location).then(resolve).catch(reject);
+        return;
+      }
+
       if (response.statusCode !== 200) {
         reject(new Error(`Failed to download image: ${response.statusCode}`));
         return;
