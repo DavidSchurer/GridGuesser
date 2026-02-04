@@ -8,6 +8,7 @@ if (typeof __dirname !== 'undefined') {
 import { docClient, TABLES, PutCommand, GetCommand, UpdateCommand, QueryCommand, ScanCommand } from "./dynamodb";
 import { GameRoom, DynamicImageMetadata } from "./types";
 import { randomUUID } from "crypto";
+import { cacheGameRoom, getCachedGameRoom, deleteCachedGameRoom } from "./redisClient";
 
 // DynamoDB table for game rooms
 const GAME_ROOMS_TABLE = process.env.DYNAMODB_GAME_ROOMS_TABLE || "GridGuesser-GameRooms";
@@ -58,23 +59,37 @@ export async function createGameRoom(
   }
 }
 
-// Get game room from DynamoDB
+// Get game room from Redis cache, then DynamoDB if cache miss
 export async function getGameRoom(roomId: string): Promise<GameRoom | null> {
   try {
+    // Try Redis cache first
+    const cachedRoom = await getCachedGameRoom(roomId);
+    if (cachedRoom) {
+      return cachedRoom as GameRoom;
+    }
+
+    // Cache miss - fetch from DynamoDB
     const command = new GetCommand({
       TableName: GAME_ROOMS_TABLE,
       Key: { roomId },
     });
 
     const response = await docClient.send(command);
-    return (response.Item as GameRoom) || null;
+    const room = (response.Item as GameRoom) || null;
+
+    // Cache the room if found
+    if (room) {
+      await cacheGameRoom(roomId, room);
+    }
+
+    return room;
   } catch (error) {
     console.error("Error getting game room:", error);
     return null;
   }
 }
 
-// Update game room in DynamoDB
+// Update game room in DynamoDB and Redis cache
 export async function updateGameRoom(room: GameRoom): Promise<{ success: boolean; error?: string }> {
   try {
     const command = new PutCommand({
@@ -83,6 +98,10 @@ export async function updateGameRoom(room: GameRoom): Promise<{ success: boolean
     });
 
     await docClient.send(command);
+    
+    // Update Redis cache
+    await cacheGameRoom(room.roomId, room);
+    
     return { success: true };
   } catch (error) {
     console.error("Error updating game room:", error);
@@ -206,6 +225,10 @@ export async function deleteGameRoom(roomId: string): Promise<{ success: boolean
     });
 
     await docClient.send(command);
+    
+    // Also clear from Redis cache
+    await deleteCachedGameRoom(roomId);
+    
     return { success: true };
   } catch (error) {
     console.error("Error deleting game room:", error);

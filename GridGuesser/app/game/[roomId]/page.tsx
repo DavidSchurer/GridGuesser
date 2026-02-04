@@ -13,6 +13,7 @@ import RoomCodeDisplay from "@/components/RoomCodeDisplay";
 import PowerUpsSidebar from "@/components/PowerUpsSidebar";
 import PlayerInfo from "@/components/PlayerInfo";
 import Icon from "@/components/Icon";
+import { motion, AnimatePresence } from "framer-motion";
 
 export default function GameRoomPage() {
   const params = useParams();
@@ -106,7 +107,19 @@ export default function GameRoomPage() {
       setOpponentConnected(true);
       showNotification("Opponent joined! Game starting...");
       
-      // Fetch updated game state
+      // Clear any previous game state (especially for rematches)
+      const currentRoom = useGameStore.getState().gameRoom;
+      if (currentRoom) {
+        setGameRoom({
+          ...currentRoom,
+          revealedTiles: [[], []],
+          points: [0, 0],
+          currentTurn: data.currentTurn,
+          gameState: 'playing',
+        });
+      }
+      
+      // Fetch updated game state with new images
       socketInstance.emit("get-game-state", roomId, (room: GameRoom | null) => {
         if (room) {
           setGameRoom(room);
@@ -270,7 +283,18 @@ export default function GameRoomPage() {
       setOpponentRematchRequested(false);
       setLastRevealedTile(null);
       
-      // Fetch updated game state
+      // Immediately clear the revealed tiles in local state
+      const currentRoom = useGameStore.getState().gameRoom;
+      if (currentRoom) {
+        setGameRoom({
+          ...currentRoom,
+          revealedTiles: [[], []],
+          points: [0, 0],
+          gameState: 'waiting',
+        });
+      }
+      
+      // Fetch updated game state with new images
       setTimeout(() => {
         socketInstance.emit("get-game-state", roomId, (room: GameRoom | null) => {
           if (room) {
@@ -431,11 +455,23 @@ export default function GameRoomPage() {
         </div>
 
         {/* Notification */}
-        {notification && (
-          <div className="fixed top-4 right-4 z-50 bg-blue-600 text-white px-6 py-3 rounded-lg shadow-lg animate-slide-up">
-            {notification}
-          </div>
-        )}
+        <AnimatePresence>
+          {notification && (
+            <motion.div
+              initial={{ opacity: 0, y: -50, scale: 0.8 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -20, scale: 0.9 }}
+              transition={{ 
+                type: "spring",
+                stiffness: 300,
+                damping: 20
+              }}
+              className="fixed top-4 right-4 z-50 bg-blue-600 text-white px-6 py-3 rounded-lg shadow-lg"
+            >
+              {notification}
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Player Info Cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
@@ -513,9 +549,25 @@ export default function GameRoomPage() {
             </div>
 
             {/* Rematch Modal */}
-            {showRematchModal && gameRoom.gameState === 'finished' && (
-              <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
-                <div className="bg-gray-900 border border-gray-700 rounded-lg shadow-2xl p-8 max-w-md w-full mx-4">
+            <AnimatePresence>
+              {showRematchModal && gameRoom.gameState === 'finished' && (
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50"
+                >
+                  <motion.div
+                    initial={{ scale: 0.8, opacity: 0, y: 50 }}
+                    animate={{ scale: 1, opacity: 1, y: 0 }}
+                    exit={{ scale: 0.8, opacity: 0, y: 50 }}
+                    transition={{ 
+                      type: "spring",
+                      stiffness: 300,
+                      damping: 25
+                    }}
+                    className="bg-gray-900 border border-gray-700 rounded-lg shadow-2xl p-8 max-w-md w-full mx-4"
+                  >
                   <h2 className="text-2xl font-bold text-white text-center mb-4">
                     Game Over!
                   </h2>
@@ -589,9 +641,10 @@ export default function GameRoomPage() {
                       Both players ready! Starting rematch...
                     </p>
                   )}
-                </div>
-              </div>
-            )}
+                  </motion.div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
 
           {/* Right: PowerUps Sidebar */}

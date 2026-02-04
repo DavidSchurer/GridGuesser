@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Image from "next/image";
+import { motion, AnimatePresence } from "framer-motion";
 
 interface GameGridProps {
   imageHash: string; // Changed from imageId to imageHash
@@ -106,14 +107,17 @@ export default function GameGrid({
           const isIn2x2 = isIn2x2Area(index);
 
           return (
-            <div
+            <motion.div
               key={index}
               onClick={() => handleTileClick(index)}
               onMouseEnter={() => handleTileHover(index)}
+              initial={false}
+              whileHover={isClickable && !reveal2x2Mode ? { scale: 1.05, zIndex: 10 } : {}}
+              whileTap={isClickable ? { scale: 0.95 } : {}}
               className={`
                 tile relative
                 ${isRevealed ? 'revealed' : ''}
-                ${isClickable && !reveal2x2Mode ? 'cursor-pointer hover:scale-105 hover:z-10 hover:shadow-lg' : ''}
+                ${isClickable && !reveal2x2Mode ? 'cursor-pointer' : ''}
                 ${isClickable && reveal2x2Mode ? 'cursor-crosshair' : ''}
                 ${!isClickable && !isRevealed ? 'bg-gray-300 dark:bg-gray-700' : ''}
                 ${disabled ? 'disabled' : ''}
@@ -123,24 +127,49 @@ export default function GameGrid({
                 transition-all duration-150 ease-out
               `}
             >
-              {isRevealed ? (
-                <Image
-                  src={getTileUrl(index)}
-                  alt={`Tile ${index + 1}`}
-                  width={100}
-                  height={100}
-                  className="tile-image animate-fade-in w-full h-full object-cover"
-                  unoptimized
-                />
-              ) : (
-                <div className="w-full h-full flex items-center justify-center text-gray-400 dark:text-gray-600 text-xs font-mono">
-                  {index + 1}
-                  {isIn2x2 && reveal2x2Mode && (
-                    <div className="absolute inset-0 bg-purple-500 opacity-40 animate-pulse pointer-events-none" />
-                  )}
-                </div>
-              )}
-            </div>
+              <AnimatePresence mode="wait">
+                {isRevealed ? (
+                  <motion.div
+                    key="revealed"
+                    initial={{ rotateY: 90, opacity: 0 }}
+                    animate={{ rotateY: 0, opacity: 1 }}
+                    exit={{ rotateY: -90, opacity: 0 }}
+                    transition={{ 
+                      duration: 0.4,
+                      ease: "easeOut"
+                    }}
+                    className="w-full h-full"
+                  >
+                    <Image
+                      src={getTileUrl(index)}
+                      alt={`Tile ${index + 1}`}
+                      width={100}
+                      height={100}
+                      className="tile-image w-full h-full object-cover"
+                      unoptimized
+                    />
+                  </motion.div>
+                ) : (
+                  <motion.div
+                    key="hidden"
+                    initial={{ rotateY: -90, opacity: 0 }}
+                    animate={{ rotateY: 0, opacity: 1 }}
+                    exit={{ rotateY: 90, opacity: 0 }}
+                    transition={{ duration: 0.3 }}
+                    className="w-full h-full flex items-center justify-center text-gray-400 dark:text-gray-600 text-xs font-mono"
+                  >
+                    {index + 1}
+                    {isIn2x2 && reveal2x2Mode && (
+                      <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 0.4 }}
+                        className="absolute inset-0 bg-purple-500 pointer-events-none"
+                      />
+                    )}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </motion.div>
           );
         })}
       </div>
