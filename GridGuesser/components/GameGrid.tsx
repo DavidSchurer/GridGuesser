@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Image from "next/image";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -25,6 +25,15 @@ export default function GameGrid({
 }: GameGridProps) {
   const [loadingTile, setLoadingTile] = useState<number | null>(null);
   const [hoveredTile, setHoveredTile] = useState<number | null>(null);
+  
+  // Force reset when imageHash changes (on rematch)
+  const gridKey = `${imageHash}-${revealedTiles.length}`;
+  
+  // Reset component state when imageHash changes (new game)
+  useEffect(() => {
+    setLoadingTile(null);
+    setHoveredTile(null);
+  }, [imageHash]);
 
   const handleTileClick = (tileIndex: number) => {
     if (disabled || !isMyTurn || !isOpponentGrid) {
@@ -108,10 +117,9 @@ export default function GameGrid({
 
           return (
             <motion.div
-              key={index}
+              key={`${imageHash}-tile-${index}`}
               onClick={() => handleTileClick(index)}
               onMouseEnter={() => handleTileHover(index)}
-              initial={false}
               whileHover={isClickable && !reveal2x2Mode ? { scale: 1.05, zIndex: 10 } : {}}
               whileTap={isClickable ? { scale: 0.95 } : {}}
               className={`
@@ -130,7 +138,7 @@ export default function GameGrid({
               <AnimatePresence mode="wait">
                 {isRevealed ? (
                   <motion.div
-                    key="revealed"
+                    key={`${imageHash}-revealed-${index}`}
                     initial={{ rotateY: 90, opacity: 0 }}
                     animate={{ rotateY: 0, opacity: 1 }}
                     exit={{ rotateY: -90, opacity: 0 }}
@@ -151,7 +159,7 @@ export default function GameGrid({
                   </motion.div>
                 ) : (
                   <motion.div
-                    key="hidden"
+                    key={`${imageHash}-hidden-${index}`}
                     initial={{ rotateY: -90, opacity: 0 }}
                     animate={{ rotateY: 0, opacity: 1 }}
                     exit={{ rotateY: 90, opacity: 0 }}

@@ -39,6 +39,7 @@ export default function GameRoomPage() {
   const [showRematchModal, setShowRematchModal] = useState(false);
   const [rematchRequested, setRematchRequested] = useState(false);
   const [opponentRematchRequested, setOpponentRematchRequested] = useState(false);
+  const [gameResetKey, setGameResetKey] = useState(0); // Force full reset on rematch
 
   const showNotification = (message: string) => {
     setNotification(message);
@@ -277,15 +278,24 @@ export default function GameRoomPage() {
 
     // Listen for rematch start
     socketInstance.on("rematch-start", (data: { roomId: string }) => {
+      console.log("🔄 REMATCH START - Resetting all tiles");
       showNotification("Rematch starting...");
       setShowRematchModal(false);
       setRematchRequested(false);
       setOpponentRematchRequested(false);
       setLastRevealedTile(null);
       
+      // Increment reset key to force full component remount
+      setGameResetKey(prev => {
+        const newKey = prev + 1;
+        console.log(`🔑 Game reset key: ${prev} → ${newKey}`);
+        return newKey;
+      });
+      
       // Immediately clear the revealed tiles in local state
       const currentRoom = useGameStore.getState().gameRoom;
       if (currentRoom) {
+        console.log("🧹 Clearing revealed tiles:", currentRoom.revealedTiles, "→ [[], []]");
         setGameRoom({
           ...currentRoom,
           revealedTiles: [[], []],
@@ -298,6 +308,10 @@ export default function GameRoomPage() {
       setTimeout(() => {
         socketInstance.emit("get-game-state", roomId, (room: GameRoom | null) => {
           if (room) {
+            console.log("📥 New game state received:", {
+              revealedTiles: room.revealedTiles,
+              imageHashes: room.imageHashes,
+            });
             setGameRoom(room);
             showNotification("New game started!");
           }
@@ -513,6 +527,7 @@ export default function GameRoomPage() {
               <Icon name="target" size={24} className="text-red-500" />
             </h3>
             <GameGrid
+              key={`opponent-${opponentImageHash}-${gameResetKey}`}
               imageHash={opponentImageHash}
               revealedTiles={opponentRevealedTiles}
               isMyTurn={isMyTurn}
@@ -530,6 +545,7 @@ export default function GameRoomPage() {
               <Icon name="image" size={24} className="text-purple-500" />
             </h3>
             <GameGrid
+              key={`my-${myImageHash}-${gameResetKey}`}
               imageHash={myImageHash}
               revealedTiles={myRevealedTiles}
               isMyTurn={false}
