@@ -8,6 +8,8 @@
     "start": "next start",
     "lint": "next lint",
     "server": "tsx watch server/index.ts",
+    "server:prod": "tsx server/index.ts",
+    "deploy": "npm run build && npm run server:prod",
     "setup-db": "tsx scripts/setupDatabase.ts",
     "test-aws": "tsx scripts/testAwsConnection.ts",
     "create-tables": "tsx scripts/createGameRoomsTable.ts"

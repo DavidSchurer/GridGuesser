@@ -35,6 +35,9 @@ export default function GameRoomPage() {
   const [lastRevealedTile, setLastRevealedTile] = useState<number | null>(null);
   const [notification, setNotification] = useState<string | null>(null);
   const [selectedPowerUp, setSelectedPowerUp] = useState<string | null>(null);
+  const [showRematchModal, setShowRematchModal] = useState(false);
+  const [rematchRequested, setRematchRequested] = useState(false);
+  const [opponentRematchRequested, setOpponentRematchRequested] = useState(false);
 
   const showNotification = (message: string) => {
     setNotification(message);
@@ -139,15 +142,50 @@ export default function GameRoomPage() {
         });
       }, 100);
 
-      // Show notification for opponent's move
-      if (data.revealedBy !== playerIndex) {
+      // Show notification based on who revealed the tile
+      // Get current playerIndex from store to avoid stale closure value
+      const currentPlayerIndex = useGameStore.getState().playerIndex;
+      if (data.revealedBy !== currentPlayerIndex) {
         showNotification(`Opponent revealed a tile!`);
+      } else {
+        showNotification(`You revealed a tile!`);
       }
     });
 
     // Listen for power-up usage
     socketInstance.on("power-up-used", (data: { powerUpId: string; usedBy: number; message: string; points: [number, number]; allRevealedTiles?: [number[], number[]]; currentTurn?: 0 | 1 }) => {
-      showNotification(data.message);
+      // Personalize the message based on who used the power-up
+      // Get current playerIndex from store to avoid stale closure values
+      const currentPlayerIndex = useGameStore.getState().playerIndex;
+      const isCurrentPlayer = data.usedBy === currentPlayerIndex;
+      
+      // Create personalized message based on power-up type and who used it
+      let personalizedMessage = '';
+      
+      if (data.powerUpId === 'skip') {
+        if (isCurrentPlayer) {
+          personalizedMessage = 'You used Skip Turn! Take an extra turn!';
+        } else {
+          personalizedMessage = 'Opponent used Skip Turn! Your next turn is skipped!';
+        }
+      } else if (data.powerUpId === 'reveal2x2') {
+        if (isCurrentPlayer) {
+          personalizedMessage = 'You used Reveal 2x2!';
+        } else {
+          personalizedMessage = 'Opponent used Reveal 2x2 on your image!';
+        }
+      } else if (data.powerUpId === 'nuke') {
+        if (isCurrentPlayer) {
+          personalizedMessage = 'You used Nuke!';
+        } else {
+          personalizedMessage = 'Opponent used Nuke on your image!';
+        }
+      } else {
+        // Fallback to original message
+        personalizedMessage = data.message;
+      }
+      
+      showNotification(personalizedMessage);
       
       // Immediately update local game state with the revealed tiles
       if (data.allRevealedTiles) {
@@ -190,8 +228,11 @@ export default function GameRoomPage() {
 
     // Listen for game end
     socketInstance.on("game-end", (data: { winner: number; winnerGuess: string; correctAnswer: string }) => {
+      // Get current playerIndex from store to avoid stale closure value
+      const currentPlayerIndex = useGameStore.getState().playerIndex;
+      
       showNotification(
-        data.winner === playerIndex
+        data.winner === currentPlayerIndex
           ? `You won! The answer was: ${data.correctAnswer}`
           : `You lost! The answer was: ${data.correctAnswer}`
       );
@@ -205,6 +246,47 @@ export default function GameRoomPage() {
 
       // Refresh user profile to get updated stats
       refreshProfile().catch(error => console.error("Error refreshing profile:", error));
+      
+      // Show rematch modal after a short delay
+      setTimeout(() => {
+        setShowRematchModal(true);
+      }, 2000);
+    });
+
+    // Listen for rematch requests
+    socketInstance.on("rematch-requested", (data: { playerIndex: number }) => {
+      const currentPlayerIndex = useGameStore.getState().playerIndex;
+      if (data.playerIndex !== currentPlayerIndex) {
+        setOpponentRematchRequested(true);
+        showNotification("Opponent wants a rematch!");
+      }
+    });
+
+    // Listen for rematch start
+    socketInstance.on("rematch-start", (data: { roomId: string }) => {
+      showNotification("Rematch starting...");
+      setShowRematchModal(false);
+      setRematchRequested(false);
+      setOpponentRematchRequested(false);
+      setLastRevealedTile(null);
+      
+      // Fetch updated game state
+      setTimeout(() => {
+        socketInstance.emit("get-game-state", roomId, (room: GameRoom | null) => {
+          if (room) {
+            setGameRoom(room);
+            showNotification("New game started!");
+          }
+        });
+      }, 500);
+    });
+
+    // Listen for rematch declined
+    socketInstance.on("rematch-declined", () => {
+      showNotification("Opponent declined rematch");
+      setShowRematchModal(false);
+      setRematchRequested(false);
+      setOpponentRematchRequested(false);
     });
 
     // Listen for player disconnection
@@ -256,6 +338,29 @@ export default function GameRoomPage() {
         showNotification(errorMsg || "Failed to submit guess");
       }
     });
+  };
+
+  const handleRematchRequest = () => {
+    if (!socket || playerIndex === null) return;
+    
+    setRematchRequested(true);
+    socket.emit("request-rematch", { roomId }, (success: boolean, errorMsg?: string) => {
+      if (!success) {
+        showNotification(errorMsg || "Failed to request rematch");
+        setRematchRequested(false);
+      } else {
+        showNotification("Rematch requested! Waiting for opponent...");
+      }
+    });
+  };
+
+  const handleDeclineRematch = () => {
+    if (!socket) return;
+    
+    socket.emit("decline-rematch", { roomId });
+    setShowRematchModal(false);
+    setRematchRequested(false);
+    setOpponentRematchRequested(false);
   };
 
   if (error) {
@@ -407,15 +512,84 @@ export default function GameRoomPage() {
               />
             </div>
 
-            {/* Game Over Actions */}
-            {gameRoom.gameState === 'finished' && (
-              <div className="max-w-md mx-auto mt-8 text-center">
-                <button
-                  onClick={() => router.push("/")}
-                  className="w-full px-6 py-4 bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white rounded-xl font-semibold text-lg transition-all duration-200 transform hover:scale-105"
-                >
-                  Play Again
-                </button>
+            {/* Rematch Modal */}
+            {showRematchModal && gameRoom.gameState === 'finished' && (
+              <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
+                <div className="bg-gray-900 border border-gray-700 rounded-lg shadow-2xl p-8 max-w-md w-full mx-4">
+                  <h2 className="text-2xl font-bold text-white text-center mb-4">
+                    Game Over!
+                  </h2>
+                  
+                  {!rematchRequested && !opponentRematchRequested && (
+                    <>
+                      <p className="text-gray-300 text-center mb-6">
+                        Would you like a rematch with the same category?
+                      </p>
+                      <div className="space-y-3">
+                        <button
+                          onClick={handleRematchRequest}
+                          className="w-full px-6 py-3 bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white rounded-lg font-semibold transition-all duration-200"
+                        >
+                          Rematch
+                        </button>
+                        <button
+                          onClick={handleDeclineRematch}
+                          className="w-full px-6 py-3 bg-gray-700 hover:bg-gray-600 text-white rounded-lg font-semibold transition-all duration-200"
+                        >
+                          Decline
+                        </button>
+                        <button
+                          onClick={() => router.push("/")}
+                          className="w-full px-6 py-3 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg font-semibold transition-all duration-200"
+                        >
+                          Back to Home
+                        </button>
+                      </div>
+                    </>
+                  )}
+                  
+                  {rematchRequested && !opponentRematchRequested && (
+                    <>
+                      <p className="text-gray-300 text-center mb-6">
+                        Waiting for opponent to accept rematch...
+                      </p>
+                      <button
+                        onClick={handleDeclineRematch}
+                        className="w-full px-6 py-3 bg-gray-700 hover:bg-gray-600 text-white rounded-lg font-semibold transition-all duration-200"
+                      >
+                        Cancel
+                      </button>
+                    </>
+                  )}
+                  
+                  {!rematchRequested && opponentRematchRequested && (
+                    <>
+                      <p className="text-gray-300 text-center mb-6">
+                        Your opponent wants a rematch!
+                      </p>
+                      <div className="space-y-3">
+                        <button
+                          onClick={handleRematchRequest}
+                          className="w-full px-6 py-3 bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white rounded-lg font-semibold transition-all duration-200"
+                        >
+                          Accept Rematch
+                        </button>
+                        <button
+                          onClick={handleDeclineRematch}
+                          className="w-full px-6 py-3 bg-gray-700 hover:bg-gray-600 text-white rounded-lg font-semibold transition-all duration-200"
+                        >
+                          Decline
+                        </button>
+                      </div>
+                    </>
+                  )}
+                  
+                  {rematchRequested && opponentRematchRequested && (
+                    <p className="text-green-400 text-center font-semibold">
+                      Both players ready! Starting rematch...
+                    </p>
+                  )}
+                </div>
               </div>
             )}
           </div>

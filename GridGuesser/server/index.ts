@@ -303,8 +303,8 @@ io.on("connection", (socket: Socket) => {
         } else {
           [image1, image2] = await fetchTwoImagesForGame(category as CategoryKey);
         }
-        
-        if (image1 && image2) {
+      
+      if (image1 && image2) {
           // Try to store images and generate tiles
           updateResult = await updateGameImages(roomId, [image1, image2]);
           
@@ -479,13 +479,27 @@ io.on("connection", (socket: Socket) => {
       return;
     }
 
-    // Check guess against opponent's image
+    // IMPORTANT: Check guess against OPPONENT's image, not player's own image
+    // Player 0 tries to guess Player 1's image, and vice versa
     const opponentIndex = 1 - playerIndex;
     const correctAnswer = room.imageNames[opponentIndex];
+    const playerOwnAnswer = room.imageNames[playerIndex];
     
     // Normalize and check guess
     const normalizedGuess = guess.toLowerCase().trim();
     const normalizedAnswer = correctAnswer.toLowerCase().trim();
+    const normalizedOwnAnswer = playerOwnAnswer.toLowerCase().trim();
+    
+    // Check if player accidentally guessed their own image (should not win)
+    const guessedOwnImage = normalizedGuess === normalizedOwnAnswer || 
+                           normalizedOwnAnswer.includes(normalizedGuess) ||
+                           normalizedGuess.includes(normalizedOwnAnswer);
+    
+    if (guessedOwnImage) {
+      console.log(`⚠️  Player ${playerIndex} guessed their own image: "${guess}" (own: "${playerOwnAnswer}")`);
+      callback(false, false, "You guessed your own image! Try guessing your opponent's image.");
+      return;
+    }
     
     const isCorrect = normalizedGuess === normalizedAnswer || 
                      normalizedAnswer.includes(normalizedGuess) ||
@@ -613,7 +627,7 @@ io.on("connection", (socket: Socket) => {
           powerUpId,
           usedBy: playerIndex,
           points: room.points,
-          message: `${room.players[playerIndex].name} used Skip Turn! Take an extra turn!`,
+          message: `${room.players[playerIndex].name} used Skip Turn!`,
         });
         break;
 
@@ -649,7 +663,7 @@ io.on("connection", (socket: Socket) => {
           allRevealedTiles: room.revealedTiles,
           points: room.points,
           currentTurn: room.currentTurn,
-          message: `${room.players[playerIndex].name} revealed a 2x2 area!`,
+          message: `${room.players[playerIndex].name} used Reveal 2x2!`,
         });
         break;
 
@@ -669,7 +683,7 @@ io.on("connection", (socket: Socket) => {
           allRevealedTiles: room.revealedTiles,
           points: room.points,
           currentTurn: room.currentTurn,
-          message: `${room.players[playerIndex].name} nuked the image!`,
+          message: `${room.players[playerIndex].name} used Nuke!`,
         });
         break;
     }
@@ -677,6 +691,144 @@ io.on("connection", (socket: Socket) => {
     // Update room in DynamoDB
     await updateGameRoom(room);
     callback(true);
+  });
+
+  // Handle rematch request
+  socket.on("request-rematch", async ({ roomId }, callback) => {
+    try {
+      const room = await getGameRoom(roomId);
+      
+      if (!room) {
+        callback(false, "Room not found");
+        return;
+      }
+
+      const playerIndex = room.players.findIndex((p: Player) => p.socketId === socket.id);
+      
+      if (playerIndex === -1) {
+        callback(false, "You are not in this room");
+        return;
+      }
+
+      // Initialize rematch requests if not exists
+      if (!room.rematchRequests) {
+        room.rematchRequests = [false, false];
+      }
+
+      // Mark this player as wanting a rematch
+      room.rematchRequests[playerIndex] = true;
+      
+      // Notify the room
+      io.to(roomId).emit("rematch-requested", { playerIndex });
+
+      // Check if both players want a rematch
+      if (room.rematchRequests[0] && room.rematchRequests[1]) {
+        // Both players agreed, start a new game
+        const category = room.category;
+        const customQuery = room.customQuery;
+
+        // Reset game state
+        room.gameState = 'waiting';
+        room.revealedTiles = [[], []];
+        room.points = [0, 0];
+        room.currentTurn = Math.random() < 0.5 ? 0 : 1;
+        room.winner = undefined;
+        room.skipTurnActive = false;
+        room.rematchRequests = [false, false];
+
+        // Fetch new images
+        let image1, image2;
+        let updateResult;
+        let retryCount = 0;
+        const maxRetries = 3;
+        
+        // Retry loop for fetching images
+        while (retryCount < maxRetries) {
+          try {
+            // Use custom query if category is 'custom'
+            if (category === 'custom' && customQuery) {
+              const { fetchTwoImagesForCustomGame } = await import("../lib/googleImagesApi");
+              [image1, image2] = await fetchTwoImagesForCustomGame(customQuery);
+              console.log(`Rematch attempt ${retryCount + 1}: Fetching images with custom query: "${customQuery}"`);
+            } else {
+              [image1, image2] = await fetchTwoImagesForGame(category as CategoryKey);
+              console.log(`Rematch attempt ${retryCount + 1}: Fetching images for category: "${category}"`);
+            }
+            
+            if (image1 && image2) {
+              // Try to store images and generate tiles
+              updateResult = await updateGameImages(roomId, [image1, image2]);
+              
+              if (updateResult.success) {
+                const queryInfo = customQuery ? `custom query "${customQuery}"` : `category "${category}"`;
+                console.log(`✅ Rematch images successfully stored from ${queryInfo}: "${image1.title}" and "${image2.title}"`);
+                break;
+              } else {
+                console.log(`⚠️  Rematch attempt ${retryCount + 1} failed: ${updateResult.error}. Retrying...`);
+                retryCount++;
+              }
+            } else {
+              console.log(`⚠️  Failed to fetch rematch images on attempt ${retryCount + 1}`);
+              retryCount++;
+            }
+          } catch (error) {
+            console.error(`Rematch image fetch attempt ${retryCount + 1} failed:`, error);
+            retryCount++;
+          }
+        }
+        
+        // Check if we succeeded or need to use fallback
+        if (updateResult && updateResult.success) {
+          // Get updated room from DynamoDB
+          const updatedRoom = await getGameRoom(roomId);
+          if (updatedRoom) {
+            // Notify both players
+            io.to(roomId).emit("rematch-start", { roomId });
+            io.to(roomId).emit("game-start", {
+              roomId,
+              players: updatedRoom.players,
+              currentTurn: updatedRoom.currentTurn,
+              imageHashes: updatedRoom.imageHashes,
+              category: updatedRoom.category,
+            });
+            console.log(`✅ Rematch started for room ${roomId}`);
+          }
+        } else {
+          // All retries failed - notify players
+          io.to(roomId).emit("rematch-declined");
+          console.log('⚠️  All rematch retries failed.');
+        }
+      } else {
+        await updateGameRoom(room);
+      }
+
+      callback(true);
+    } catch (error) {
+      console.error("Error handling rematch request:", error);
+      callback(false, "Failed to process rematch request");
+    }
+  });
+
+  // Handle decline rematch
+  socket.on("decline-rematch", async ({ roomId }) => {
+    try {
+      const room = await getGameRoom(roomId);
+      
+      if (!room) return;
+
+      const playerIndex = room.players.findIndex((p: Player) => p.socketId === socket.id);
+      
+      if (playerIndex === -1) return;
+
+      // Reset rematch requests
+      room.rematchRequests = [false, false];
+      await updateGameRoom(room);
+
+      // Notify the other player
+      io.to(roomId).emit("rematch-declined");
+    } catch (error) {
+      console.error("Error handling decline rematch:", error);
+    }
   });
 
   // Handle disconnection

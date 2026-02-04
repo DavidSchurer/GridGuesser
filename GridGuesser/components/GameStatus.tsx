@@ -30,12 +30,12 @@ export default function GameStatus({
     if (gameState === 'finished') {
       if (winner === playerIndex) {
         return {
-          text: `${myName} Won!`,
+          text: 'You Won!',
           color: 'text-green-600 dark:text-green-400',
         };
       } else {
         return {
-          text: `${opponentName} Won!`,
+          text: 'You Lost',
           color: 'text-red-600 dark:text-red-400',
         };
       }

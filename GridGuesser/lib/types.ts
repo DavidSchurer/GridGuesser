@@ -21,6 +21,7 @@ export interface GameRoom {
   customQuery?: string; // custom search query when category is 'custom'
   imageMetadata?: [DynamicImageMetadata | null, DynamicImageMetadata | null]; // full image data
   skipTurnActive?: boolean; // if true, current player gets an extra turn
+  rematchRequests?: [boolean, boolean]; // tracks which players want a rematch
 }
 
 export interface DynamicImageMetadata {
