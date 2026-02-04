@@ -472,6 +472,7 @@ export default function GameRoomPage() {
         <AnimatePresence>
           {notification && (
             <motion.div
+              key="notification"
               initial={{ opacity: 0, y: -50, scale: 0.8 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: -20, scale: 0.9 }}
@@ -568,6 +569,7 @@ export default function GameRoomPage() {
             <AnimatePresence>
               {showRematchModal && gameRoom.gameState === 'finished' && (
                 <motion.div
+                  key="rematch-modal"
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   exit={{ opacity: 0 }}
