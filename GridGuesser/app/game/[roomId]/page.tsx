@@ -580,7 +580,7 @@ export default function GameRoomPage() {
           {/* Opponent's Grid */}
           <div className="flex flex-col items-center">
             <h3 className="text-xl font-semibold mb-4 text-gray-800 dark:text-gray-100 flex items-center gap-2">
-              <span className="text-purple-600 dark:text-purple-400">{opponentName}'s</span> Grid - Guess This!
+              <span className="text-purple-600 dark:text-purple-400">{opponentName}&apos;s</span> Grid - Guess This!
               <Icon name="target" size={24} className="text-red-500" />
             </h3>
             <GameGrid
@@ -598,7 +598,7 @@ export default function GameRoomPage() {
           {/* My Grid */}
           <div className="flex flex-col items-center">
             <h3 className="text-xl font-semibold mb-4 text-gray-800 dark:text-gray-100 flex items-center gap-2">
-              <span className="text-blue-600 dark:text-blue-400">Your</span> Grid ({myName}) - They're Guessing This!
+              <span className="text-blue-600 dark:text-blue-400">Your</span> Grid ({myName}) - They&apos;re Guessing This!
               <Icon name="image" size={24} className="text-purple-500" />
             </h3>
             <GameGrid
