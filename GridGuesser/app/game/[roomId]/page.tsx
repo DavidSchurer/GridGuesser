@@ -12,6 +12,7 @@ import GuessInput from "@/components/GuessInput";
 import RoomCodeDisplay from "@/components/RoomCodeDisplay";
 import PowerUpsSidebar from "@/components/PowerUpsSidebar";
 import PlayerInfo from "@/components/PlayerInfo";
+import CategorySelector from "@/components/CategorySelector";
 import Icon from "@/components/Icon";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -40,6 +41,14 @@ export default function GameRoomPage() {
   const [rematchRequested, setRematchRequested] = useState(false);
   const [opponentRematchRequested, setOpponentRematchRequested] = useState(false);
   const [gameResetKey, setGameResetKey] = useState(0); // Force full reset on rematch
+
+  // Rematch category selection
+  const [rematchCategory, setRematchCategory] = useState<string>('');
+  const [rematchCustomQuery, setRematchCustomQuery] = useState('');
+  const [opponentRematchCategory, setOpponentRematchCategory] = useState<string | null>(null);
+  const [opponentRematchCustomQuery, setOpponentRematchCustomQuery] = useState<string | null>(null);
+  const [showCategoryPicker, setShowCategoryPicker] = useState(false);
+  const [showDevAnswers, setShowDevAnswers] = useState(false); // DEV ONLY
 
   const showNotification = (message: string) => {
     setNotification(message);
@@ -261,18 +270,28 @@ export default function GameRoomPage() {
       // Refresh user profile to get updated stats
       refreshProfile().catch(error => console.error("Error refreshing profile:", error));
       
-      // Show rematch modal after a short delay
+      // Show rematch modal after a short delay – pre-fill category from current game
       setTimeout(() => {
+        const currentRoom = useGameStore.getState().gameRoom;
+        if (currentRoom?.category) {
+          setRematchCategory(currentRoom.category);
+          setRematchCustomQuery(currentRoom.customQuery || '');
+        }
         setShowRematchModal(true);
       }, 2000);
     });
 
     // Listen for rematch requests
-    socketInstance.on("rematch-requested", (data: { playerIndex: number }) => {
+    socketInstance.on("rematch-requested", (data: { playerIndex: number; category?: string; customQuery?: string }) => {
       const currentPlayerIndex = useGameStore.getState().playerIndex;
       if (data.playerIndex !== currentPlayerIndex) {
         setOpponentRematchRequested(true);
-        showNotification("Opponent wants a rematch!");
+        setOpponentRematchCategory(data.category || null);
+        setOpponentRematchCustomQuery(data.customQuery || null);
+        const catLabel = data.category === 'custom' && data.customQuery
+          ? `"${data.customQuery}"`
+          : data.category || 'same category';
+        showNotification(`Opponent wants a rematch with ${catLabel}!`);
       }
     });
 
@@ -284,6 +303,9 @@ export default function GameRoomPage() {
       setRematchRequested(false);
       setOpponentRematchRequested(false);
       setLastRevealedTile(null);
+      setShowCategoryPicker(false);
+      setOpponentRematchCategory(null);
+      setOpponentRematchCustomQuery(null);
       
       // Increment reset key to force full component remount
       setGameResetKey(prev => {
@@ -325,6 +347,9 @@ export default function GameRoomPage() {
       setShowRematchModal(false);
       setRematchRequested(false);
       setOpponentRematchRequested(false);
+      setShowCategoryPicker(false);
+      setOpponentRematchCategory(null);
+      setOpponentRematchCustomQuery(null);
     });
 
     // Listen for player disconnection
@@ -378,18 +403,22 @@ export default function GameRoomPage() {
     });
   };
 
-  const handleRematchRequest = () => {
+  const handleRematchRequest = (category?: string, customQuery?: string) => {
     if (!socket || playerIndex === null) return;
     
     setRematchRequested(true);
-    socket.emit("request-rematch", { roomId }, (success: boolean, errorMsg?: string) => {
-      if (!success) {
-        showNotification(errorMsg || "Failed to request rematch");
-        setRematchRequested(false);
-      } else {
-        showNotification("Rematch requested! Waiting for opponent...");
+    socket.emit(
+      "request-rematch",
+      { roomId, category, customQuery },
+      (success: boolean, errorMsg?: string) => {
+        if (!success) {
+          showNotification(errorMsg || "Failed to request rematch");
+          setRematchRequested(false);
+        } else {
+          showNotification("Rematch requested! Waiting for opponent...");
+        }
       }
-    });
+    );
   };
 
   const handleDeclineRematch = () => {
@@ -399,6 +428,9 @@ export default function GameRoomPage() {
     setShowRematchModal(false);
     setRematchRequested(false);
     setOpponentRematchRequested(false);
+    setShowCategoryPicker(false);
+    setOpponentRematchCategory(null);
+    setOpponentRematchCustomQuery(null);
   };
 
   if (error) {
@@ -467,6 +499,30 @@ export default function GameRoomPage() {
           </div>
           <div className="w-24"></div>
         </div>
+
+        {/* DEV: Show Answers Button */}
+        {process.env.NODE_ENV !== 'production' && gameRoom.imageNames && (
+          <div className="mb-4">
+            <button
+              onClick={() => setShowDevAnswers(prev => !prev)}
+              className="px-3 py-1.5 text-xs font-mono bg-yellow-500/20 border border-yellow-500/50 text-yellow-300 rounded hover:bg-yellow-500/30 transition-colors"
+            >
+              {showDevAnswers ? 'Hide Answers' : 'DEV: Show Answers'}
+            </button>
+            {showDevAnswers && (
+              <div className="mt-2 p-3 bg-yellow-900/30 border border-yellow-500/30 rounded-lg text-sm font-mono">
+                <p className="text-yellow-300">
+                  <span className="text-yellow-500 font-bold">Your image</span> (opponent guesses this):{' '}
+                  <span className="text-white font-bold">{gameRoom.imageNames[playerIndex]}</span>
+                </p>
+                <p className="text-yellow-300 mt-1">
+                  <span className="text-yellow-500 font-bold">Opponent&apos;s image</span> (you guess this):{' '}
+                  <span className="text-white font-bold">{gameRoom.imageNames[1 - playerIndex]}</span>
+                </p>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Notification */}
         <AnimatePresence>
@@ -573,7 +629,7 @@ export default function GameRoomPage() {
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   exit={{ opacity: 0 }}
-                  className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50"
+                  className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4"
                 >
                   <motion.div
                     initial={{ scale: 0.8, opacity: 0, y: 50 }}
@@ -584,20 +640,21 @@ export default function GameRoomPage() {
                       stiffness: 300,
                       damping: 25
                     }}
-                    className="bg-gray-900 border border-gray-700 rounded-lg shadow-2xl p-8 max-w-md w-full mx-4"
+                    className="bg-gray-900 border border-gray-700 rounded-lg shadow-2xl p-8 max-w-lg w-full mx-4 max-h-[90vh] overflow-y-auto"
                   >
                   <h2 className="text-2xl font-bold text-white text-center mb-4">
                     Game Over!
                   </h2>
-                  
-                  {!rematchRequested && !opponentRematchRequested && (
+
+                  {/* ── STATE 1: No requests yet – show "Rematch" button / category picker ── */}
+                  {!rematchRequested && !opponentRematchRequested && !showCategoryPicker && (
                     <>
                       <p className="text-gray-300 text-center mb-6">
-                        Would you like a rematch with the same category?
+                        Would you like a rematch?
                       </p>
                       <div className="space-y-3">
                         <button
-                          onClick={handleRematchRequest}
+                          onClick={() => setShowCategoryPicker(true)}
                           className="w-full px-6 py-3 bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white rounded-lg font-semibold transition-all duration-200"
                         >
                           Rematch
@@ -617,7 +674,44 @@ export default function GameRoomPage() {
                       </div>
                     </>
                   )}
-                  
+
+                  {/* ── STATE 1b: Category picker open ── */}
+                  {!rematchRequested && !opponentRematchRequested && showCategoryPicker && (
+                    <>
+                      <p className="text-gray-300 text-center mb-4">
+                        Pick a category for the rematch:
+                      </p>
+                      <div className="mb-4">
+                        <CategorySelector
+                          selectedCategory={rematchCategory}
+                          onCategoryChange={setRematchCategory}
+                          customQuery={rematchCustomQuery}
+                          onCustomQueryChange={setRematchCustomQuery}
+                        />
+                      </div>
+                      <div className="space-y-3">
+                        <button
+                          onClick={() => {
+                            const cat = rematchCategory || gameRoom.category || 'landmarks';
+                            const cq = cat === 'custom' ? rematchCustomQuery : undefined;
+                            handleRematchRequest(cat, cq);
+                          }}
+                          disabled={rematchCategory === 'custom' && !rematchCustomQuery.trim()}
+                          className="w-full px-6 py-3 bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg font-semibold transition-all duration-200"
+                        >
+                          Start Rematch
+                        </button>
+                        <button
+                          onClick={() => setShowCategoryPicker(false)}
+                          className="w-full px-6 py-3 bg-gray-700 hover:bg-gray-600 text-white rounded-lg font-semibold transition-all duration-200"
+                        >
+                          Back
+                        </button>
+                      </div>
+                    </>
+                  )}
+
+                  {/* ── STATE 2: I requested, waiting on opponent ── */}
                   {rematchRequested && !opponentRematchRequested && (
                     <>
                       <p className="text-gray-300 text-center mb-6">
@@ -631,15 +725,26 @@ export default function GameRoomPage() {
                       </button>
                     </>
                   )}
-                  
+
+                  {/* ── STATE 3: Opponent requested, I haven't accepted yet ── */}
                   {!rematchRequested && opponentRematchRequested && (
                     <>
-                      <p className="text-gray-300 text-center mb-6">
+                      <p className="text-gray-300 text-center mb-2">
                         Your opponent wants a rematch!
                       </p>
+                      {opponentRematchCategory && (
+                        <p className="text-blue-400 text-center text-sm mb-4">
+                          Category:{' '}
+                          <span className="font-semibold">
+                            {opponentRematchCategory === 'custom' && opponentRematchCustomQuery
+                              ? `"${opponentRematchCustomQuery}"`
+                              : opponentRematchCategory}
+                          </span>
+                        </p>
+                      )}
                       <div className="space-y-3">
                         <button
-                          onClick={handleRematchRequest}
+                          onClick={() => handleRematchRequest()}
                           className="w-full px-6 py-3 bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white rounded-lg font-semibold transition-all duration-200"
                         >
                           Accept Rematch
@@ -653,7 +758,8 @@ export default function GameRoomPage() {
                       </div>
                     </>
                   )}
-                  
+
+                  {/* ── STATE 4: Both ready ── */}
                   {rematchRequested && opponentRematchRequested && (
                     <p className="text-green-400 text-center font-semibold">
                       Both players ready! Starting rematch...

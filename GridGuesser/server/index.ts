@@ -485,25 +485,97 @@ io.on("connection", (socket: Socket) => {
     const correctAnswer = room.imageNames[opponentIndex];
     const playerOwnAnswer = room.imageNames[playerIndex];
     
-    // Normalize and check guess
-    const normalizedGuess = guess.toLowerCase().trim();
-    const normalizedAnswer = correctAnswer.toLowerCase().trim();
-    const normalizedOwnAnswer = playerOwnAnswer.toLowerCase().trim();
+    // ── Fuzzy matching helpers ──────────────────────────────────
+    // Levenshtein distance
+    function levenshtein(a: string, b: string): number {
+      const m = a.length, n = b.length;
+      const dp: number[][] = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0));
+      for (let i = 0; i <= m; i++) dp[i][0] = i;
+      for (let j = 0; j <= n; j++) dp[0][j] = j;
+      for (let i = 1; i <= m; i++) {
+        for (let j = 1; j <= n; j++) {
+          dp[i][j] = a[i - 1] === b[j - 1]
+            ? dp[i - 1][j - 1]
+            : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+        }
+      }
+      return dp[m][n];
+    }
+
+    // Normalize: lowercase, strip non-alphanumeric, collapse spaces
+    function norm(s: string): string {
+      return s.toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
+    }
+
+    // Split into meaningful words (drop tiny filler words)
+    function toWords(s: string): string[] {
+      return norm(s).split(' ').filter(w => w.length > 1);
+    }
+
+    /**
+     * Check if `guess` is a fuzzy match for `answer`.
+     * Returns true if ANY of:
+     *  1. Exact match after normalization
+     *  2. One string contains the other
+     *  3. Levenshtein distance ≤ 30% of answer length (min 2)
+     *  4. Any word in the answer appears in the guess (or vice versa) with Lev ≤ 1
+     *  5. ≥ 50% of answer words are matched by guess words (for multi-word answers)
+     */
+    function fuzzyMatch(guess: string, answer: string): boolean {
+      const g = norm(guess);
+      const a = norm(answer);
+
+      // 1. Exact
+      if (g === a) return true;
+
+      // 2. Containment
+      if (a.includes(g) || g.includes(a)) return true;
+
+      // 3. Levenshtein on full strings
+      const maxDist = Math.max(2, Math.floor(a.length * 0.3));
+      if (levenshtein(g, a) <= maxDist) return true;
+
+      // 4 & 5. Word-level matching
+      const gWords = toWords(guess);
+      const aWords = toWords(answer);
+
+      // Any answer word closely matches any guess word
+      let matchedAnswerWords = 0;
+      for (const aw of aWords) {
+        for (const gw of gWords) {
+          // Allow Levenshtein ≤ 1 per word, or containment
+          if (aw === gw || aw.includes(gw) || gw.includes(aw) || levenshtein(gw, aw) <= 1) {
+            matchedAnswerWords++;
+            break;
+          }
+        }
+      }
+
+      // If any keyword matched → correct (for 1-2 word answers this is very forgiving)
+      if (aWords.length <= 2 && matchedAnswerWords >= 1) return true;
+
+      // For longer answers, require ≥ 50% word overlap
+      if (aWords.length > 2 && matchedAnswerWords >= Math.ceil(aWords.length * 0.5)) return true;
+
+      return false;
+    }
+    // ─────────────────────────────────────────────────────────────
+
+    const normalizedGuess = norm(guess);
+    const normalizedAnswer = norm(correctAnswer);
+    const normalizedOwnAnswer = norm(playerOwnAnswer);
     
     // Check if player accidentally guessed their own image (should not win)
-    const guessedOwnImage = normalizedGuess === normalizedOwnAnswer || 
-                           normalizedOwnAnswer.includes(normalizedGuess) ||
-                           normalizedGuess.includes(normalizedOwnAnswer);
+    const guessedOwnImage = fuzzyMatch(normalizedGuess, normalizedOwnAnswer);
     
-    if (guessedOwnImage) {
+    if (guessedOwnImage && !fuzzyMatch(normalizedGuess, normalizedAnswer)) {
       console.log(`⚠️  Player ${playerIndex} guessed their own image: "${guess}" (own: "${playerOwnAnswer}")`);
       callback(false, false, "You guessed your own image! Try guessing your opponent's image.");
       return;
     }
     
-    const isCorrect = normalizedGuess === normalizedAnswer || 
-                     normalizedAnswer.includes(normalizedGuess) ||
-                     normalizedGuess.includes(normalizedAnswer);
+    const isCorrect = fuzzyMatch(normalizedGuess, normalizedAnswer);
+    console.log(`🎯 Guess check: "${guess}" vs answer "${correctAnswer}" → ${isCorrect ? 'CORRECT ✅' : 'WRONG ❌'}`);
 
     if (isCorrect) {
       room.gameState = "finished";
@@ -693,8 +765,8 @@ io.on("connection", (socket: Socket) => {
     callback(true);
   });
 
-  // Handle rematch request
-  socket.on("request-rematch", async ({ roomId }, callback) => {
+  // Handle rematch request (now accepts an optional category / customQuery)
+  socket.on("request-rematch", async ({ roomId, category: newCategory, customQuery: newCustomQuery }, callback) => {
     try {
       const room = await getGameRoom(roomId);
       
@@ -717,15 +789,29 @@ io.on("connection", (socket: Socket) => {
 
       // Mark this player as wanting a rematch
       room.rematchRequests[playerIndex] = true;
+
+      // If the requester chose a category, store it on the room for the rematch
+      if (newCategory) {
+        room.rematchCategory = newCategory;
+        room.rematchCustomQuery = newCategory === 'custom' ? (newCustomQuery || '') : undefined;
+      }
       
-      // Notify the room
-      io.to(roomId).emit("rematch-requested", { playerIndex });
+      // Notify the room (include chosen category so the other player sees it)
+      io.to(roomId).emit("rematch-requested", {
+        playerIndex,
+        category: room.rematchCategory || room.category,
+        customQuery: room.rematchCustomQuery || room.customQuery,
+      });
 
       // Check if both players want a rematch
       if (room.rematchRequests[0] && room.rematchRequests[1]) {
-        // Both players agreed, start a new game
-        const category = room.category;
-        const customQuery = room.customQuery;
+        // Both players agreed – use the rematch category if set, else keep the current one
+        const category = room.rematchCategory || room.category;
+        const customQuery = room.rematchCustomQuery ?? room.customQuery;
+
+        // Persist the new category on the room itself
+        room.category = category;
+        room.customQuery = customQuery;
 
         // Reset game state
         room.gameState = 'waiting';
@@ -735,6 +821,13 @@ io.on("connection", (socket: Socket) => {
         room.winner = undefined;
         room.skipTurnActive = false;
         room.rematchRequests = [false, false];
+        room.rematchCategory = undefined;
+        room.rematchCustomQuery = undefined;
+
+        // Save the reset state to DB BEFORE fetching new images
+        // (updateGameImages fetches a fresh room from DB, so the reset
+        // must be persisted first or the old revealedTiles will survive)
+        await updateGameRoom(room);
 
         // Fetch new images
         let image1, image2;
@@ -791,7 +884,7 @@ io.on("connection", (socket: Socket) => {
               imageHashes: updatedRoom.imageHashes,
               category: updatedRoom.category,
             });
-            console.log(`✅ Rematch started for room ${roomId}`);
+            console.log(`✅ Rematch started for room ${roomId} with category: ${category}`);
           }
         } else {
           // All retries failed - notify players
