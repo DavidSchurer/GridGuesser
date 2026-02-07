@@ -183,6 +183,7 @@ io.on("connection", (socket: Socket) => {
         gameState: "waiting",
         revealedTiles: [[], []],
         images: ["", ""],
+        imageHashes: ["", ""],
         imageNames: ["", ""],
         points: [0, 0],
         createdAt: Date.now(),
