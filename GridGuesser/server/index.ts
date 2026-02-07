@@ -35,9 +35,12 @@ import {
 const app = express();
 const httpServer = createServer(app);
 
+// Strip trailing slash from origin to avoid CORS mismatch
+const ALLOWED_ORIGIN = (process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000").replace(/\/+$/, '');
+
 // Middleware
 app.use(cors({
-  origin: process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000",
+  origin: ALLOWED_ORIGIN,
   credentials: true,
 }));
 app.use(express.json());
@@ -117,7 +120,7 @@ app.get("/api/categories", (req, res) => {
 
 const io = new Server(httpServer, {
   cors: {
-    origin: process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000",
+    origin: ALLOWED_ORIGIN,
     methods: ["GET", "POST"],
     credentials: true,
   },
