@@ -27,7 +27,7 @@ export default function CategorySelector({
 
   useEffect(() => {
     // Fetch available categories from server
-    fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api'}/categories`)
+    fetch(`${process.env.NEXT_PUBLIC_API_URL || (process.env.NEXT_PUBLIC_SOCKET_URL ? `${process.env.NEXT_PUBLIC_SOCKET_URL}/api` : 'http://localhost:3001/api')}/categories`)
       .then(res => res.json())
       .then(data => {
         setCategories(data.categories);

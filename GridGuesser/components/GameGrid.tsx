@@ -99,7 +99,8 @@ export default function GameGrid({
 
   // Get tile URL from server - only individual tiles are served
   const getTileUrl = (tileIndex: number): string => {
-    const apiBase = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
+    const apiBase = process.env.NEXT_PUBLIC_API_URL 
+      || (process.env.NEXT_PUBLIC_SOCKET_URL ? `${process.env.NEXT_PUBLIC_SOCKET_URL}/api` : 'http://localhost:3001/api');
     return `${apiBase}/tiles/${imageHash}/${tileIndex}`;
   };
 
