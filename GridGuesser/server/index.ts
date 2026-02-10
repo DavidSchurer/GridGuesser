@@ -380,12 +380,31 @@ io.on("connection", (socket: Socket) => {
       return;
     }
 
-    // Create a safe version without full image URLs
+    // Build masked image names – only show characters that have been hinted
+    // maskedImageNames[p] = the name that player p is trying to guess, with unrevealed chars replaced by _
+    const hints = room.revealedHints || [[], []];
+    const maskedImageNames: [string, string] = ["", ""];
+    for (let p = 0; p < 2; p++) {
+      const opponentIdx = 1 - p;
+      const name = room.imageNames[opponentIdx] || "";
+      const revealed = new Set(hints[p]);
+      maskedImageNames[p] = Array.from(name)
+        .map((ch, i) => {
+          if (/\s/.test(ch)) return " ";        // keep spaces visible
+          if (!/[a-zA-Z0-9]/.test(ch)) return ch; // keep punctuation visible
+          return revealed.has(i) ? ch : "_";
+        })
+        .join("");
+    }
+
+    // Create a safe version without full image URLs or raw image names
     const safeRoom = {
       ...room,
       images: undefined, // Never send full image URLs
       imageHashes: room.imageHashes, // Only send hashes
       imageMetadata: undefined, // Don't send full metadata
+      imageNames: undefined, // Never send raw names (prevents cheating)
+      maskedImageNames,     // Send masked version per player
     };
 
     callback(safeRoom);
@@ -433,6 +452,11 @@ io.on("connection", (socket: Socket) => {
 
     // Award 1 point to the player who revealed the tile
     room.points[playerIndex] += 1;
+
+    // Clear freeze on the player who just took their turn (they survived the frozen turn)
+    if (room.freezeActive && room.freezeActive[playerIndex]) {
+      room.freezeActive[playerIndex] = false;
+    }
 
     // Check if skip turn power-up is active
     if (room.skipTurnActive) {
@@ -649,8 +673,8 @@ io.on("connection", (socket: Socket) => {
   });
 
   // Use power-up
-  socket.on("use-power-up", async (data: { roomId: string; powerUpId: string; tileIndex?: number }, callback: (success: boolean, error?: string) => void) => {
-    const { roomId, powerUpId, tileIndex } = data;
+  socket.on("use-power-up", async (data: { roomId: string; powerUpId: string; tileIndex?: number; lineType?: 'row' | 'col'; lineIndex?: number }, callback: (success: boolean, error?: string) => void) => {
+    const { roomId, powerUpId, tileIndex, lineType, lineIndex } = data;
     const room = await getGameRoom(roomId);
 
     if (!room) {
@@ -671,11 +695,21 @@ io.on("connection", (socket: Socket) => {
 
     const opponentIndex = 1 - playerIndex;
 
+    // Check if player is frozen (can't use power-ups this turn)
+    if (room.freezeActive && room.freezeActive[playerIndex]) {
+      callback(false, "You're frozen! Can't use power-ups this turn.");
+      return;
+    }
+
     // Define power-up costs
     const powerUpCosts: Record<string, number> = {
       skip: 5,
       reveal2x2: 8,
       nuke: 15,
+      fog: 8,
+      revealLine: 6,
+      freeze: 6,
+      peek: 4,
     };
 
     const cost = powerUpCosts[powerUpId];
@@ -706,13 +740,12 @@ io.on("connection", (socket: Socket) => {
         });
         break;
 
-      case "reveal2x2":
+      case "reveal2x2": {
         if (tileIndex === undefined) {
           callback(false, "Tile index required for reveal2x2");
           return;
         }
 
-        // Reveal a 2x2 area starting from tileIndex (top-left)
         const row = Math.floor(tileIndex / 10);
         const col = tileIndex % 10;
         const tilesToReveal: number[] = [];
@@ -727,7 +760,6 @@ io.on("connection", (socket: Socket) => {
           }
         }
 
-        // Switch turn after using power-up
         room.currentTurn = (1 - room.currentTurn) as 0 | 1;
 
         io.to(roomId).emit("power-up-used", {
@@ -741,13 +773,12 @@ io.on("connection", (socket: Socket) => {
           message: `${room.players[playerIndex].name} used Reveal 2x2!`,
         });
         break;
+      }
 
-      case "nuke":
-        // Reveal all tiles of opponent's image
+      case "nuke": {
         const allTiles = Array.from({ length: 100 }, (_, i) => i);
         room.revealedTiles[opponentIndex] = allTiles;
 
-        // Switch turn after using power-up
         room.currentTurn = (1 - room.currentTurn) as 0 | 1;
 
         io.to(roomId).emit("power-up-used", {
@@ -761,10 +792,189 @@ io.on("connection", (socket: Socket) => {
           message: `${room.players[playerIndex].name} used Nuke!`,
         });
         break;
+      }
+
+      case "fog": {
+        // Re-hide 4 random revealed tiles on the player's OWN image (the one opponent is guessing)
+        const opponentRevealed = room.revealedTiles[playerIndex]; // tiles opponent revealed on MY image
+        if (opponentRevealed.length === 0) {
+          // Refund points – nothing to fog
+          room.points[playerIndex] += cost;
+          callback(false, "No revealed tiles to hide");
+          return;
+        }
+
+        // Pick up to 4 random tiles to re-hide
+        const shuffled = [...opponentRevealed].sort(() => Math.random() - 0.5);
+        const numToHide = Math.min(4, shuffled.length);
+        const hiddenTiles = shuffled.slice(0, numToHide);
+        room.revealedTiles[playerIndex] = opponentRevealed.filter(t => !hiddenTiles.includes(t));
+
+        io.to(roomId).emit("power-up-used", {
+          powerUpId,
+          usedBy: playerIndex,
+          targetPlayer: playerIndex, // affects own grid
+          foggedTiles: hiddenTiles,
+          allRevealedTiles: room.revealedTiles,
+          points: room.points,
+          message: `${room.players[playerIndex].name} used Fog of War! ${numToHide} tiles hidden!`,
+        });
+        console.log(`🌫️  Fog of War: Player ${playerIndex} re-hid ${numToHide} tiles on their own image`);
+        break;
+      }
+
+      case "revealLine": {
+        if (lineType === undefined || lineIndex === undefined || lineIndex < 0 || lineIndex > 9) {
+          callback(false, "Row/column selection required");
+          return;
+        }
+
+        const lineTiles: number[] = [];
+        for (let i = 0; i < 10; i++) {
+          const tile = lineType === 'row' ? lineIndex * 10 + i : i * 10 + lineIndex;
+          if (!room.revealedTiles[opponentIndex].includes(tile)) {
+            room.revealedTiles[opponentIndex].push(tile);
+            lineTiles.push(tile);
+          }
+        }
+
+        room.currentTurn = (1 - room.currentTurn) as 0 | 1;
+
+        io.to(roomId).emit("power-up-used", {
+          powerUpId,
+          usedBy: playerIndex,
+          targetPlayer: opponentIndex,
+          revealedTiles: lineTiles,
+          allRevealedTiles: room.revealedTiles,
+          points: room.points,
+          currentTurn: room.currentTurn,
+          lineType,
+          lineIndex,
+          message: `${room.players[playerIndex].name} revealed ${lineType} ${lineIndex + 1}!`,
+        });
+        console.log(`📏 Reveal Line: Player ${playerIndex} revealed ${lineType} ${lineIndex} (${lineTiles.length} new tiles)`);
+        break;
+      }
+
+      case "freeze": {
+        // Freeze opponent – they can't use power-ups on their next turn
+        if (!room.freezeActive) room.freezeActive = [false, false];
+        room.freezeActive[opponentIndex] = true;
+
+        io.to(roomId).emit("power-up-used", {
+          powerUpId,
+          usedBy: playerIndex,
+          targetPlayer: opponentIndex,
+          points: room.points,
+          freezeActive: room.freezeActive,
+          message: `${room.players[playerIndex].name} used Freeze!`,
+        });
+        console.log(`❄️  Freeze: Player ${playerIndex} froze Player ${opponentIndex}'s power-ups`);
+        break;
+      }
+
+      case "peek": {
+        if (tileIndex === undefined) {
+          callback(false, "Tile position required for peek");
+          return;
+        }
+
+        // Calculate 3x3 area centered on the selected tile
+        const peekRow = Math.floor(tileIndex / 10);
+        const peekCol = tileIndex % 10;
+        const peekTiles: number[] = [];
+
+        for (let r = peekRow - 1; r <= peekRow + 1; r++) {
+          for (let c = peekCol - 1; c <= peekCol + 1; c++) {
+            if (r >= 0 && r < 10 && c >= 0 && c < 10) {
+              peekTiles.push(r * 10 + c);
+            }
+          }
+        }
+
+        // Don't modify revealedTiles – peek is temporary, handled client-side
+        room.currentTurn = (1 - room.currentTurn) as 0 | 1;
+
+        io.to(roomId).emit("power-up-used", {
+          powerUpId,
+          usedBy: playerIndex,
+          targetPlayer: opponentIndex,
+          peekTiles,          // tiles to temporarily show
+          peekPlayerIndex: playerIndex, // only this player sees the peek
+          points: room.points,
+          currentTurn: room.currentTurn,
+          message: `${room.players[playerIndex].name} used Peek!`,
+        });
+        console.log(`🔍 Peek: Player ${playerIndex} peeking at ${peekTiles.length} tiles for 5 seconds`);
+        break;
+      }
     }
 
     // Update room in DynamoDB
     await updateGameRoom(room);
+    callback(true);
+  });
+
+  // Use a hint – reveal one letter of the opponent's image name
+  const HINT_COST = 3;
+
+  socket.on("use-hint", async (data: { roomId: string }, callback: (success: boolean, error?: string) => void) => {
+    const { roomId } = data;
+    const room = await getGameRoom(roomId);
+
+    if (!room) { callback(false, "Room not found"); return; }
+    if (room.gameState !== "playing") { callback(false, "Game not in progress"); return; }
+
+    const playerIndex = room.players.findIndex(p => p.socketId === socket.id);
+    if (playerIndex === -1) { callback(false, "Player not in room"); return; }
+
+    // Check points
+    if (room.points[playerIndex] < HINT_COST) {
+      callback(false, "Not enough points (need 3)");
+      return;
+    }
+
+    const opponentIndex = 1 - playerIndex;
+    const answer = room.imageNames[opponentIndex]; // the word this player is guessing
+
+    if (!answer) { callback(false, "No image to hint"); return; }
+
+    // Initialise if missing (legacy rooms)
+    if (!room.revealedHints) room.revealedHints = [[], []];
+
+    // Build list of revealable character indices (letters/numbers only, skip spaces & punctuation)
+    const alreadyRevealed = new Set(room.revealedHints[playerIndex]);
+    const revealable: number[] = [];
+    for (let i = 0; i < answer.length; i++) {
+      if (/[a-zA-Z0-9]/.test(answer[i]) && !alreadyRevealed.has(i)) {
+        revealable.push(i);
+      }
+    }
+
+    if (revealable.length === 0) {
+      callback(false, "All letters already revealed");
+      return;
+    }
+
+    // Pick a random unrevealed character
+    const idx = revealable[Math.floor(Math.random() * revealable.length)];
+
+    // Deduct points & record the hint
+    room.points[playerIndex] -= HINT_COST;
+    room.revealedHints[playerIndex].push(idx);
+
+    await updateGameRoom(room);
+
+    // Broadcast to both players so the UI updates
+    io.to(roomId).emit("hint-revealed", {
+      playerIndex,        // who bought the hint
+      charIndex: idx,     // which character was revealed
+      char: answer[idx],  // the actual character
+      revealedHints: room.revealedHints,
+      points: room.points,
+    });
+
+    console.log(`💡 Hint: Player ${playerIndex} revealed letter "${answer[idx]}" (index ${idx}) of "${answer}" for ${HINT_COST} pts`);
     callback(true);
   });
 
@@ -819,10 +1029,12 @@ io.on("connection", (socket: Socket) => {
         // Reset game state
         room.gameState = 'waiting';
         room.revealedTiles = [[], []];
+        room.revealedHints = [[], []];
         room.points = [0, 0];
         room.currentTurn = Math.random() < 0.5 ? 0 : 1;
         room.winner = undefined;
         room.skipTurnActive = false;
+        room.freezeActive = [false, false];
         room.rematchRequests = [false, false];
         room.rematchCategory = undefined;
         room.rematchCustomQuery = undefined;

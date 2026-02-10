@@ -43,6 +43,7 @@ export async function createGameRoom(
       category,
       customQuery, // Store custom query if provided
       imageMetadata: [null, null],
+      revealedHints: [[], []],
       skipTurnActive: false,
     };
 

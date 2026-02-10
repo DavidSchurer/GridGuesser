@@ -20,7 +20,10 @@ export interface GameRoom {
   category?: string; // selected category for image fetching
   customQuery?: string; // custom search query when category is 'custom'
   imageMetadata?: [DynamicImageMetadata | null, DynamicImageMetadata | null]; // full image data
+  revealedHints?: [number[], number[]]; // indices of revealed characters for each player's opponent image
+  maskedImageNames?: [string, string]; // masked opponent names per player (sent by server, not stored in DB)
   skipTurnActive?: boolean; // if true, current player gets an extra turn
+  freezeActive?: [boolean, boolean]; // if true, that player can't use power-ups on their current turn
   rematchRequests?: [boolean, boolean]; // tracks which players want a rematch
   rematchCategory?: string; // category chosen for next rematch
   rematchCustomQuery?: string; // custom query chosen for next rematch
@@ -63,8 +66,10 @@ export interface GameStateUpdate {
   winnerGuess?: string;
 }
 
+export type PowerUpId = 'skip' | 'reveal2x2' | 'nuke' | 'fog' | 'revealLine' | 'freeze' | 'peek';
+
 export interface PowerUp {
-  id: 'skip' | 'reveal2x2' | 'nuke';
+  id: PowerUpId;
   name: string;
   cost: number;
   description: string;
@@ -73,8 +78,10 @@ export interface PowerUp {
 
 export interface UsePowerUpEvent {
   roomId: string;
-  powerUpId: 'skip' | 'reveal2x2' | 'nuke';
-  tileIndex?: number; // For reveal2x2, the top-left tile
+  powerUpId: PowerUpId;
+  tileIndex?: number; // For reveal2x2/peek, the center/top-left tile
+  lineType?: 'row' | 'col'; // For revealLine
+  lineIndex?: number; // Row or column number (0-9)
 }
 
 // User Authentication Types

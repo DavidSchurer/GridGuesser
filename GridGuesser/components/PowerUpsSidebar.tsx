@@ -4,19 +4,22 @@ import { useState } from "react";
 import Icon from "./Icon";
 
 export interface PowerUp {
-  id: 'skip' | 'reveal2x2' | 'nuke';
+  id: string;
   name: string;
   cost: number;
   description: string;
   icon: string;
+  // How the power-up is activated
+  activation: 'instant' | 'selectTile' | 'selectLine';
 }
 
 interface PowerUpsSidebarProps {
   myPoints: number;
   opponentPoints: number;
   isMyTurn: boolean;
-  onUsePowerUp: (powerUpId: string, tileIndex?: number) => void;
+  onUsePowerUp: (powerUpId: string, tileIndex?: number, lineType?: 'row' | 'col', lineIndex?: number) => void;
   disabled?: boolean;
+  isFrozen?: boolean; // player is frozen and can't use power-ups this turn
 }
 
 const powerUps: PowerUp[] = [
@@ -24,8 +27,41 @@ const powerUps: PowerUp[] = [
     id: 'skip',
     name: 'Skip Turn',
     cost: 5,
-    description: 'Force opponent to skip their next turn',
+    description: 'Opponent skips their next turn',
     icon: 'clock',
+    activation: 'instant',
+  },
+  {
+    id: 'peek',
+    name: 'Peek',
+    cost: 4,
+    description: 'Glimpse a 3x3 area for 5 seconds',
+    icon: 'peek',
+    activation: 'selectTile',
+  },
+  {
+    id: 'revealLine',
+    name: 'Reveal Row/Col',
+    cost: 6,
+    description: 'Reveal an entire row or column',
+    icon: 'revealLine',
+    activation: 'selectLine',
+  },
+  {
+    id: 'freeze',
+    name: 'Freeze',
+    cost: 6,
+    description: 'Block opponent from using power-ups next turn',
+    icon: 'freeze',
+    activation: 'instant',
+  },
+  {
+    id: 'fog',
+    name: 'Fog of War',
+    cost: 8,
+    description: 'Re-hide 4 tiles on your image',
+    icon: 'fog',
+    activation: 'instant',
   },
   {
     id: 'reveal2x2',
@@ -33,6 +69,7 @@ const powerUps: PowerUp[] = [
     cost: 8,
     description: 'Reveal a 2x2 area on opponent\'s grid',
     icon: 'grid2x2',
+    activation: 'selectTile',
   },
   {
     id: 'nuke',
@@ -40,6 +77,7 @@ const powerUps: PowerUp[] = [
     cost: 15,
     description: 'Reveal the entire opponent\'s image',
     icon: 'nuke',
+    activation: 'instant',
   },
 ];
 
@@ -49,24 +87,40 @@ export default function PowerUpsSidebar({
   isMyTurn,
   onUsePowerUp,
   disabled = false,
+  isFrozen = false,
 }: PowerUpsSidebarProps) {
   const [selectedPowerUp, setSelectedPowerUp] = useState<string | null>(null);
-  const [showInstructions, setShowInstructions] = useState(false);
+  const [lineSelectionMode, setLineSelectionMode] = useState<'row' | 'col' | null>(null);
 
   const handlePowerUpClick = (powerUp: PowerUp) => {
-    if (disabled || myPoints < powerUp.cost || !isMyTurn) return;
+    if (disabled || isFrozen || myPoints < powerUp.cost || !isMyTurn) return;
 
-    if (powerUp.id === 'reveal2x2') {
-      // For reveal2x2, we need the user to select a tile
+    if (powerUp.activation === 'selectTile') {
+      // Needs tile selection on the grid (reveal2x2, peek)
       setSelectedPowerUp(powerUp.id);
-      setShowInstructions(true);
-      // Notify parent component to enable 2x2 mode
-      onUsePowerUp(powerUp.id);
+      setLineSelectionMode(null);
+      onUsePowerUp(powerUp.id); // Notify parent to enter tile-select mode
+    } else if (powerUp.activation === 'selectLine') {
+      // Needs row/column selection
+      setSelectedPowerUp(powerUp.id);
+      setLineSelectionMode(null); // Will be set when user picks row or col
     } else {
-      // For skip and nuke, execute immediately
+      // Instant power-ups
       onUsePowerUp(powerUp.id);
       setSelectedPowerUp(null);
     }
+  };
+
+  const handleLineSelect = (type: 'row' | 'col', index: number) => {
+    onUsePowerUp('revealLine', undefined, type, index);
+    setSelectedPowerUp(null);
+    setLineSelectionMode(null);
+  };
+
+  const handleCancel = () => {
+    setSelectedPowerUp(null);
+    setLineSelectionMode(null);
+    onUsePowerUp('cancel');
   };
 
   const canAfford = (cost: number) => myPoints >= cost;
@@ -79,6 +133,15 @@ export default function PowerUpsSidebar({
           Power-Ups
         </h2>
       </div>
+
+      {/* Frozen Warning */}
+      {isFrozen && isMyTurn && !disabled && (
+        <div className="bg-cyan-100 dark:bg-cyan-900/30 border border-cyan-400 dark:border-cyan-600 rounded-lg p-3">
+          <p className="text-sm text-cyan-800 dark:text-cyan-200 text-center font-semibold">
+            ❄️ You&apos;re frozen! No power-ups this turn.
+          </p>
+        </div>
+      )}
 
       {/* Turn Indicator */}
       {!isMyTurn && !disabled && (
@@ -107,28 +170,61 @@ export default function PowerUpsSidebar({
         </div>
       </div>
 
-      {/* Instructions */}
-      {showInstructions && selectedPowerUp === 'reveal2x2' && (
+      {/* Instructions for active power-ups */}
+      {selectedPowerUp === 'reveal2x2' && (
         <div className="bg-purple-100 dark:bg-purple-900 border-2 border-purple-400 dark:border-purple-600 rounded-lg p-4 animate-fade-in">
-          <div>
-            <p className="text-sm text-purple-900 dark:text-purple-100 font-bold mb-1">
-              2x2 Reveal Mode Active!
-            </p>
-            <p className="text-xs text-purple-800 dark:text-purple-200 mb-2">
-              Hover over the opponent&apos;s grid to see the 2x2 area. Click anywhere to reveal all 4 tiles!
-            </p>
+          <p className="text-sm text-purple-900 dark:text-purple-100 font-bold mb-1">2x2 Reveal Mode</p>
+          <p className="text-xs text-purple-800 dark:text-purple-200 mb-2">Click a tile on opponent&apos;s grid to reveal a 2x2 area.</p>
+          <button onClick={handleCancel} className="text-xs text-purple-700 dark:text-purple-300 bg-purple-200 dark:bg-purple-800 px-2 py-1 rounded hover:bg-purple-300 dark:hover:bg-purple-700 transition-colors">Cancel</button>
+        </div>
+      )}
+
+      {selectedPowerUp === 'peek' && (
+        <div className="bg-amber-100 dark:bg-amber-900 border-2 border-amber-400 dark:border-amber-600 rounded-lg p-4 animate-fade-in">
+          <p className="text-sm text-amber-900 dark:text-amber-100 font-bold mb-1">Peek Mode</p>
+          <p className="text-xs text-amber-800 dark:text-amber-200 mb-2">Click a tile on opponent&apos;s grid to peek at a 3x3 area for 5 seconds.</p>
+          <button onClick={handleCancel} className="text-xs text-amber-700 dark:text-amber-300 bg-amber-200 dark:bg-amber-800 px-2 py-1 rounded hover:bg-amber-300 dark:hover:bg-amber-700 transition-colors">Cancel</button>
+        </div>
+      )}
+
+      {selectedPowerUp === 'revealLine' && !lineSelectionMode && (
+        <div className="bg-teal-100 dark:bg-teal-900 border-2 border-teal-400 dark:border-teal-600 rounded-lg p-4 animate-fade-in">
+          <p className="text-sm text-teal-900 dark:text-teal-100 font-bold mb-2">Reveal what?</p>
+          <div className="flex gap-2 mb-2">
             <button
-              onClick={() => {
-                setSelectedPowerUp(null);
-                setShowInstructions(false);
-                // Notify parent to exit 2x2 mode
-                onUsePowerUp('cancel' as any);
-              }}
-              className="text-xs text-purple-700 dark:text-purple-300 bg-purple-200 dark:bg-purple-800 px-2 py-1 rounded hover:bg-purple-300 dark:hover:bg-purple-700 transition-colors"
+              onClick={() => setLineSelectionMode('row')}
+              className="flex-1 py-2 px-3 bg-teal-500 hover:bg-teal-600 text-white text-sm font-semibold rounded transition-colors"
             >
-              Cancel
+              Row
+            </button>
+            <button
+              onClick={() => setLineSelectionMode('col')}
+              className="flex-1 py-2 px-3 bg-teal-500 hover:bg-teal-600 text-white text-sm font-semibold rounded transition-colors"
+            >
+              Column
             </button>
           </div>
+          <button onClick={handleCancel} className="text-xs text-teal-700 dark:text-teal-300 bg-teal-200 dark:bg-teal-800 px-2 py-1 rounded hover:bg-teal-300 dark:hover:bg-teal-700 transition-colors">Cancel</button>
+        </div>
+      )}
+
+      {selectedPowerUp === 'revealLine' && lineSelectionMode && (
+        <div className="bg-teal-100 dark:bg-teal-900 border-2 border-teal-400 dark:border-teal-600 rounded-lg p-4 animate-fade-in">
+          <p className="text-sm text-teal-900 dark:text-teal-100 font-bold mb-2">
+            Pick {lineSelectionMode === 'row' ? 'a row' : 'a column'} (1-10):
+          </p>
+          <div className="grid grid-cols-5 gap-1 mb-2">
+            {Array.from({ length: 10 }, (_, i) => (
+              <button
+                key={i}
+                onClick={() => handleLineSelect(lineSelectionMode, i)}
+                className="py-1.5 bg-teal-500 hover:bg-teal-600 text-white text-sm font-bold rounded transition-colors"
+              >
+                {i + 1}
+              </button>
+            ))}
+          </div>
+          <button onClick={handleCancel} className="text-xs text-teal-700 dark:text-teal-300 bg-teal-200 dark:bg-teal-800 px-2 py-1 rounded hover:bg-teal-300 dark:hover:bg-teal-700 transition-colors">Cancel</button>
         </div>
       )}
 
@@ -137,7 +233,7 @@ export default function PowerUpsSidebar({
         {powerUps.map((powerUp) => {
           const affordable = canAfford(powerUp.cost);
           const isSelected = selectedPowerUp === powerUp.id;
-          const canUse = affordable && isMyTurn && !disabled;
+          const canUse = affordable && isMyTurn && !disabled && !isFrozen;
 
           return (
             <button
@@ -191,4 +287,3 @@ export default function PowerUpsSidebar({
     </div>
   );
 }
-

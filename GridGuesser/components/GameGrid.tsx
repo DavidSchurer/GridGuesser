@@ -5,13 +5,15 @@ import Image from "next/image";
 import { motion, AnimatePresence } from "framer-motion";
 
 interface GameGridProps {
-  imageHash: string; // Changed from imageId to imageHash
+  imageHash: string;
   revealedTiles: number[];
   isMyTurn: boolean;
   isOpponentGrid: boolean;
   onTileClick?: (tileIndex: number) => void;
   disabled?: boolean;
   reveal2x2Mode?: boolean;
+  peekMode?: boolean;
+  peekTiles?: number[]; // tiles temporarily visible via Peek power-up
 }
 
 export default function GameGrid({
@@ -22,6 +24,8 @@ export default function GameGrid({
   onTileClick,
   disabled = false,
   reveal2x2Mode = false,
+  peekMode = false,
+  peekTiles = [],
 }: GameGridProps) {
   const [loadingTile, setLoadingTile] = useState<number | null>(null);
   const [hoveredTile, setHoveredTile] = useState<number | null>(null);
@@ -40,9 +44,8 @@ export default function GameGrid({
       return;
     }
 
-    // In reveal2x2 mode, allow clicking on any tile (even revealed ones)
-    // The server will handle which tiles to reveal
-    if (!reveal2x2Mode && revealedTiles.includes(tileIndex)) {
+    // In reveal2x2 or peekMode, allow clicking on any tile (even revealed ones)
+    if (!reveal2x2Mode && !peekMode && revealedTiles.includes(tileIndex)) {
       return;
     }
     
@@ -59,7 +62,6 @@ export default function GameGrid({
     const col = tileIndex % 10;
     const tiles: number[] = [];
 
-    // Ensure we don't go beyond grid boundaries
     const maxRow = Math.min(row + 2, 10);
     const maxCol = Math.min(col + 2, 10);
 
@@ -72,32 +74,54 @@ export default function GameGrid({
     return tiles;
   };
 
+  // Calculate 3x3 area centered on tileIndex (for peek hover preview)
+  const get3x3Tiles = (tileIndex: number): number[] => {
+    const row = Math.floor(tileIndex / 10);
+    const col = tileIndex % 10;
+    const tiles: number[] = [];
+
+    for (let r = row - 1; r <= row + 1; r++) {
+      for (let c = col - 1; c <= col + 1; c++) {
+        if (r >= 0 && r < 10 && c >= 0 && c < 10) {
+          tiles.push(r * 10 + c);
+        }
+      }
+    }
+
+    return tiles;
+  };
+
   // Check if a tile should be highlighted in 2x2 mode
   const isIn2x2Area = (tileIndex: number): boolean => {
     if (!reveal2x2Mode || hoveredTile === null || !isOpponentGrid) {
       return false;
     }
-    
-    // Calculate the 2x2 area based on hoveredTile
-    const tiles2x2 = get2x2Tiles(hoveredTile);
-    return tiles2x2.includes(tileIndex);
+    return get2x2Tiles(hoveredTile).includes(tileIndex);
+  };
+
+  // Check if a tile should be highlighted in peek mode
+  const isInPeekArea = (tileIndex: number): boolean => {
+    if (!peekMode || hoveredTile === null || !isOpponentGrid) {
+      return false;
+    }
+    return get3x3Tiles(hoveredTile).includes(tileIndex);
   };
 
   // Handle mouse enter on a tile
   const handleTileHover = (tileIndex: number) => {
-    if (reveal2x2Mode && isOpponentGrid) {
+    if ((reveal2x2Mode || peekMode) && isOpponentGrid) {
       setHoveredTile(tileIndex);
     }
   };
 
   // Handle mouse leave from the entire grid
   const handleGridMouseLeave = () => {
-    if (reveal2x2Mode && isOpponentGrid) {
+    if ((reveal2x2Mode || peekMode) && isOpponentGrid) {
       setHoveredTile(null);
     }
   };
 
-  // Get tile URL from server - only individual tiles are served
+  // Get tile URL from server
   const getTileUrl = (tileIndex: number): string => {
     const apiBase = process.env.NEXT_PUBLIC_API_URL 
       || (process.env.NEXT_PUBLIC_SOCKET_URL ? `${process.env.NEXT_PUBLIC_SOCKET_URL}/api` : 'http://localhost:3001/api');
@@ -112,36 +136,42 @@ export default function GameGrid({
       >
         {Array.from({ length: 100 }).map((_, index) => {
           const isRevealed = revealedTiles.includes(index);
-          const isClickable = isOpponentGrid && isMyTurn && !disabled && (reveal2x2Mode || !isRevealed);
+          const isPeeking = peekTiles.includes(index); // temporarily visible via Peek
+          const showImage = isRevealed || isPeeking;
+          const isClickable = isOpponentGrid && isMyTurn && !disabled && (reveal2x2Mode || peekMode || !isRevealed);
           const isLoading = loadingTile === index;
           const isIn2x2 = isIn2x2Area(index);
+          const isInPeek = isInPeekArea(index);
 
           return (
             <motion.div
               key={`${imageHash}-tile-${index}`}
               onClick={() => handleTileClick(index)}
               onMouseEnter={() => handleTileHover(index)}
-              whileHover={isClickable && !reveal2x2Mode ? { scale: 1.05, zIndex: 10 } : {}}
+              whileHover={isClickable && !reveal2x2Mode && !peekMode ? { scale: 1.05, zIndex: 10 } : {}}
               whileTap={isClickable ? { scale: 0.95 } : {}}
               className={`
                 tile relative
-                ${isRevealed ? 'revealed' : ''}
-                ${isClickable && !reveal2x2Mode ? 'cursor-pointer' : ''}
-                ${isClickable && reveal2x2Mode ? 'cursor-crosshair' : ''}
-                ${!isClickable && !isRevealed ? 'bg-gray-300 dark:bg-gray-700' : ''}
+                ${showImage ? 'revealed' : ''}
+                ${isClickable && !reveal2x2Mode && !peekMode ? 'cursor-pointer' : ''}
+                ${isClickable && (reveal2x2Mode || peekMode) ? 'cursor-crosshair' : ''}
+                ${!isClickable && !showImage ? 'bg-gray-300 dark:bg-gray-700' : ''}
                 ${disabled ? 'disabled' : ''}
                 ${isLoading ? 'animate-pulse' : ''}
                 ${isIn2x2 && !isRevealed ? '!bg-purple-300 dark:!bg-purple-700 ring-4 ring-purple-500 scale-[1.08] z-[30] shadow-2xl' : ''}
                 ${isIn2x2 && isRevealed ? 'ring-4 ring-purple-400 scale-[1.05] z-[25]' : ''}
+                ${isInPeek && !isRevealed ? '!bg-amber-300 dark:!bg-amber-700 ring-4 ring-amber-500 scale-[1.08] z-[30] shadow-2xl' : ''}
+                ${isInPeek && isRevealed ? 'ring-4 ring-amber-400 scale-[1.05] z-[25]' : ''}
+                ${isPeeking && !isRevealed ? 'ring-2 ring-amber-400 z-[20]' : ''}
                 transition-all duration-150 ease-out
               `}
             >
               <AnimatePresence mode="wait">
-                {isRevealed ? (
+                {showImage ? (
                   <motion.div
-                    key={`${imageHash}-revealed-${index}`}
+                    key={`${imageHash}-revealed-${index}-${isPeeking ? 'peek' : 'perm'}`}
                     initial={{ rotateY: 90, opacity: 0 }}
-                    animate={{ rotateY: 0, opacity: 1 }}
+                    animate={{ rotateY: 0, opacity: isPeeking && !isRevealed ? 0.85 : 1 }}
                     exit={{ rotateY: -90, opacity: 0 }}
                     transition={{ 
                       duration: 0.4,
@@ -157,6 +187,10 @@ export default function GameGrid({
                       className="tile-image w-full h-full object-cover"
                       unoptimized
                     />
+                    {/* Peek shimmer overlay */}
+                    {isPeeking && !isRevealed && (
+                      <div className="absolute inset-0 bg-amber-400/20 animate-pulse pointer-events-none" />
+                    )}
                   </motion.div>
                 ) : (
                   <motion.div
@@ -173,6 +207,13 @@ export default function GameGrid({
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 0.4 }}
                         className="absolute inset-0 bg-purple-500 pointer-events-none"
+                      />
+                    )}
+                    {isInPeek && peekMode && (
+                      <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 0.4 }}
+                        className="absolute inset-0 bg-amber-500 pointer-events-none"
                       />
                     )}
                   </motion.div>
@@ -192,4 +233,3 @@ export default function GameGrid({
     </div>
   );
 }
-

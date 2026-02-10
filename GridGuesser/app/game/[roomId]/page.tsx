@@ -48,7 +48,10 @@ export default function GameRoomPage() {
   const [opponentRematchCategory, setOpponentRematchCategory] = useState<string | null>(null);
   const [opponentRematchCustomQuery, setOpponentRematchCustomQuery] = useState<string | null>(null);
   const [showCategoryPicker, setShowCategoryPicker] = useState(false);
-  const [showDevAnswers, setShowDevAnswers] = useState(false); // DEV ONLY
+
+  // New power-up states
+  const [peekTiles, setPeekTiles] = useState<number[]>([]); // tiles temporarily visible via Peek
+  const [isFrozen, setIsFrozen] = useState(false); // whether this player is frozen
 
   // Invite link join flow: prompt for name when arriving without one
   const [showJoinPrompt, setShowJoinPrompt] = useState(false);
@@ -199,41 +202,60 @@ export default function GameRoomPage() {
     });
 
     // Listen for power-up usage
-    socketInstance.on("power-up-used", (data: { powerUpId: string; usedBy: number; message: string; points: [number, number]; allRevealedTiles?: [number[], number[]]; currentTurn?: 0 | 1 }) => {
-      // Personalize the message based on who used the power-up
-      // Get current playerIndex from store to avoid stale closure values
+    socketInstance.on("power-up-used", (data: {
+      powerUpId: string; usedBy: number; message: string; points: [number, number];
+      allRevealedTiles?: [number[], number[]]; currentTurn?: 0 | 1;
+      foggedTiles?: number[]; freezeActive?: [boolean, boolean];
+      peekTiles?: number[]; peekPlayerIndex?: number;
+      targetPlayer?: number; lineType?: string; lineIndex?: number;
+    }) => {
       const currentPlayerIndex = useGameStore.getState().playerIndex;
       const isCurrentPlayer = data.usedBy === currentPlayerIndex;
       
-      // Create personalized message based on power-up type and who used it
+      // Build personalized notification
       let personalizedMessage = '';
       
       if (data.powerUpId === 'skip') {
-        if (isCurrentPlayer) {
-          personalizedMessage = 'You used Skip Turn! Take an extra turn!';
-        } else {
-          personalizedMessage = 'Opponent used Skip Turn! Your next turn is skipped!';
-        }
+        personalizedMessage = isCurrentPlayer ? 'You used Skip Turn! Take an extra turn!' : 'Opponent used Skip Turn! Your next turn is skipped!';
       } else if (data.powerUpId === 'reveal2x2') {
-        if (isCurrentPlayer) {
-          personalizedMessage = 'You used Reveal 2x2!';
-        } else {
-          personalizedMessage = 'Opponent used Reveal 2x2 on your image!';
-        }
+        personalizedMessage = isCurrentPlayer ? 'You used Reveal 2x2!' : 'Opponent used Reveal 2x2 on your image!';
       } else if (data.powerUpId === 'nuke') {
-        if (isCurrentPlayer) {
-          personalizedMessage = 'You used Nuke!';
-        } else {
-          personalizedMessage = 'Opponent used Nuke on your image!';
-        }
+        personalizedMessage = isCurrentPlayer ? 'You used Nuke!' : 'Opponent used Nuke on your image!';
+      } else if (data.powerUpId === 'fog') {
+        personalizedMessage = isCurrentPlayer
+          ? `Fog of War! ${data.foggedTiles?.length || 0} tiles hidden on your image!`
+          : `Opponent used Fog of War! ${data.foggedTiles?.length || 0} tiles re-hidden!`;
+      } else if (data.powerUpId === 'revealLine') {
+        const lineLabel = data.lineType === 'row' ? `Row ${(data.lineIndex ?? 0) + 1}` : `Column ${(data.lineIndex ?? 0) + 1}`;
+        personalizedMessage = isCurrentPlayer ? `You revealed ${lineLabel}!` : `Opponent revealed ${lineLabel} on your image!`;
+      } else if (data.powerUpId === 'freeze') {
+        personalizedMessage = isCurrentPlayer ? 'You froze your opponent!' : 'You\'ve been frozen! No power-ups next turn!';
+      } else if (data.powerUpId === 'peek') {
+        personalizedMessage = isCurrentPlayer ? 'Peeking for 5 seconds...' : 'Opponent is peeking at your image!';
       } else {
-        // Fallback to original message
         personalizedMessage = data.message;
       }
       
       showNotification(personalizedMessage);
+
+      // Handle Peek: temporarily show tiles for the player who used it
+      if (data.powerUpId === 'peek' && data.peekTiles && data.peekPlayerIndex === currentPlayerIndex) {
+        setPeekTiles(data.peekTiles);
+        // Auto-hide after 5 seconds
+        setTimeout(() => {
+          setPeekTiles([]);
+          showNotification('Peek expired!');
+        }, 5000);
+      }
+
+      // Handle Freeze: update local frozen state
+      if (data.freezeActive) {
+        if (currentPlayerIndex !== null) {
+          setIsFrozen(data.freezeActive[currentPlayerIndex]);
+        }
+      }
       
-      // Immediately update local game state with the revealed tiles
+      // Update revealed tiles (covers reveal2x2, nuke, fog, revealLine)
       if (data.allRevealedTiles) {
         const currentRoom = useGameStore.getState().gameRoom;
         if (currentRoom) {
@@ -244,16 +266,30 @@ export default function GameRoomPage() {
             currentTurn: data.currentTurn !== undefined ? data.currentTurn : currentRoom.currentTurn,
           });
         }
+      } else {
+        // For power-ups without tile changes (skip, freeze), just update points
+        const currentRoom = useGameStore.getState().gameRoom;
+        if (currentRoom) {
+          setGameRoom({
+            ...currentRoom,
+            points: data.points,
+            currentTurn: data.currentTurn !== undefined ? data.currentTurn : currentRoom.currentTurn,
+          });
+        }
       }
       
-      // Also fetch fresh game state to ensure synchronization
+      // Fetch fresh game state to ensure sync
       setTimeout(() => {
         socketInstance.emit("get-game-state", roomId, (room: GameRoom | null) => {
           if (room) {
             setGameRoom(room);
+            // Also sync freeze state from server
+            if (room.freezeActive && currentPlayerIndex !== null) {
+              setIsFrozen(room.freezeActive[currentPlayerIndex]);
+            }
           }
         });
-      }, 100);
+      }, 200);
     });
 
     // Listen for wrong guesses
@@ -329,6 +365,9 @@ export default function GameRoomPage() {
       setShowCategoryPicker(false);
       setOpponentRematchCategory(null);
       setOpponentRematchCustomQuery(null);
+      setPeekTiles([]);
+      setIsFrozen(false);
+      setSelectedPowerUp(null);
       
       // Increment reset key to force full component remount
       setGameResetKey(prev => {
@@ -364,6 +403,35 @@ export default function GameRoomPage() {
       }, 500);
     });
 
+    // Listen for hint reveals
+    socketInstance.on("hint-revealed", (data: { playerIndex: number; charIndex: number; char: string; revealedHints: [number[], number[]]; points: [number, number] }) => {
+      const currentPlayerIndex = useGameStore.getState().playerIndex;
+      const currentRoom = useGameStore.getState().gameRoom;
+      if (currentRoom) {
+        // Update maskedImageNames locally for the player who bought the hint
+        const updatedMasked = [...(currentRoom.maskedImageNames || ["", ""])] as [string, string];
+        if (data.playerIndex === currentPlayerIndex) {
+          // This hint was for us – update our masked name
+          const chars = updatedMasked[data.playerIndex].split("");
+          if (data.charIndex < chars.length) {
+            chars[data.charIndex] = data.char;
+            updatedMasked[data.playerIndex] = chars.join("");
+          }
+        }
+        setGameRoom({
+          ...currentRoom,
+          revealedHints: data.revealedHints,
+          maskedImageNames: updatedMasked,
+          points: data.points,
+        });
+      }
+      if (data.playerIndex === currentPlayerIndex) {
+        showNotification(`Hint: letter "${data.char.toUpperCase()}" revealed!`);
+      } else {
+        showNotification("Opponent used a hint!");
+      }
+    });
+
     // Listen for rematch declined
     socketInstance.on("rematch-declined", () => {
       showNotification("Opponent declined rematch");
@@ -397,6 +465,13 @@ export default function GameRoomPage() {
       return;
     }
 
+    // If peek is selected, use it on this tile
+    if (selectedPowerUp === 'peek') {
+      handleUsePowerUp('peek', tileIndex);
+      setSelectedPowerUp(null);
+      return;
+    }
+
     socket.emit("reveal-tile", { roomId, tileIndex }, (success: boolean, errorMsg?: string) => {
       if (!success) {
         showNotification(errorMsg || "Failed to reveal tile");
@@ -404,14 +479,34 @@ export default function GameRoomPage() {
     });
   };
 
-  const handleUsePowerUp = (powerUpId: string, tileIndex?: number) => {
+  const handleUsePowerUp = (powerUpId: string, tileIndex?: number, lineType?: 'row' | 'col', lineIndex?: number) => {
     if (!socket) return;
 
-    socket.emit("use-power-up", { roomId, powerUpId, tileIndex }, (success: boolean, errorMsg?: string) => {
+    // 'cancel' is a client-only action to exit selection mode
+    if (powerUpId === 'cancel') {
+      setSelectedPowerUp(null);
+      return;
+    }
+
+    // For power-ups that need tile selection, just enter selection mode
+    if ((powerUpId === 'reveal2x2' || powerUpId === 'peek') && tileIndex === undefined) {
+      setSelectedPowerUp(powerUpId);
+      return;
+    }
+
+    socket.emit("use-power-up", { roomId, powerUpId, tileIndex, lineType, lineIndex }, (success: boolean, errorMsg?: string) => {
       if (!success) {
         showNotification(errorMsg || "Failed to use power-up");
-      } else {
-        showNotification("Power-up activated!");
+      }
+    });
+  };
+
+  const handleUseHint = () => {
+    if (!socket) return;
+
+    socket.emit("use-hint", { roomId }, (success: boolean, errorMsg?: string) => {
+      if (!success) {
+        showNotification(errorMsg || "Failed to use hint");
       }
     });
   };
@@ -576,29 +671,7 @@ export default function GameRoomPage() {
           <div className="w-24"></div>
         </div>
 
-        {/* DEV: Show Answers Button */}
-        {process.env.NODE_ENV !== 'production' && gameRoom.imageNames && (
-          <div className="mb-4">
-            <button
-              onClick={() => setShowDevAnswers(prev => !prev)}
-              className="px-3 py-1.5 text-xs font-mono bg-yellow-500/20 border border-yellow-500/50 text-yellow-300 rounded hover:bg-yellow-500/30 transition-colors"
-            >
-              {showDevAnswers ? 'Hide Answers' : 'DEV: Show Answers'}
-            </button>
-            {showDevAnswers && (
-              <div className="mt-2 p-3 bg-yellow-900/30 border border-yellow-500/30 rounded-lg text-sm font-mono">
-                <p className="text-yellow-300">
-                  <span className="text-yellow-500 font-bold">Your image</span> (opponent guesses this):{' '}
-                  <span className="text-white font-bold">{gameRoom.imageNames[playerIndex]}</span>
-                </p>
-                <p className="text-yellow-300 mt-1">
-                  <span className="text-yellow-500 font-bold">Opponent&apos;s image</span> (you guess this):{' '}
-                  <span className="text-white font-bold">{gameRoom.imageNames[1 - playerIndex]}</span>
-                </p>
-              </div>
-            )}
-          </div>
-        )}
+        {/* Word hints are now shown under the opponent's grid */}
 
         {/* Notification */}
         <AnimatePresence>
@@ -668,7 +741,39 @@ export default function GameRoomPage() {
               onTileClick={handleTileClick}
               disabled={gameRoom.gameState !== 'playing'}
               reveal2x2Mode={selectedPowerUp === 'reveal2x2'}
+              peekMode={selectedPowerUp === 'peek'}
+              peekTiles={peekTiles}
             />
+
+            {/* Word Hint Display */}
+            {gameRoom.gameState === 'playing' && gameRoom.maskedImageNames && playerIndex !== null && (
+              <div className="mt-4 w-full max-w-[600px]">
+                <div className="bg-gray-100 dark:bg-gray-700/50 rounded-lg px-4 py-3 flex items-center justify-between gap-3">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Opponent&apos;s Image</p>
+                    <div className="font-mono text-2xl tracking-[0.3em] text-gray-800 dark:text-gray-100 overflow-x-auto whitespace-nowrap">
+                      {gameRoom.maskedImageNames[playerIndex].split("").map((ch, i) => (
+                        <span
+                          key={i}
+                          className={ch === "_" ? "text-gray-400 dark:text-gray-500" : "text-green-600 dark:text-green-400 font-bold"}
+                        >
+                          {ch === " " ? "\u00A0\u00A0" : ch}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                  <button
+                    onClick={handleUseHint}
+                    disabled={myPoints < 3 || gameRoom.gameState !== 'playing'}
+                    className="shrink-0 px-3 py-2 bg-amber-500 hover:bg-amber-600 disabled:bg-gray-400 disabled:cursor-not-allowed text-white text-sm font-semibold rounded-lg transition-colors flex items-center gap-1.5"
+                    title="Reveal a random letter (costs 3 points)"
+                  >
+                    <span>Hint</span>
+                    <span className="text-xs opacity-90">(3 pts)</span>
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* My Grid */}
@@ -853,16 +958,11 @@ export default function GameRoomPage() {
               myPoints={myPoints}
               opponentPoints={opponentPoints}
               isMyTurn={isMyTurn}
-              onUsePowerUp={(powerUpId, tileIndex) => {
-                if (powerUpId === 'reveal2x2') {
-                  setSelectedPowerUp(powerUpId);
-                } else if (powerUpId === 'cancel') {
-                  setSelectedPowerUp(null);
-                } else {
-                  handleUsePowerUp(powerUpId, tileIndex);
-                }
+              onUsePowerUp={(powerUpId, tileIndex, lineType, lineIndex) => {
+                handleUsePowerUp(powerUpId, tileIndex, lineType, lineIndex);
               }}
               disabled={gameRoom.gameState !== 'playing'}
+              isFrozen={isFrozen}
             />
           </div>
         </div>
