@@ -36,22 +36,18 @@ export default function Home() {
   };
 
   const handleNameSubmit = () => {
-    // If user is logged in, use their username
     const finalName = user ? user.username : (playerName.trim() || 'Guest');
-    
     if (!user && playerName.trim().length === 0) return;
-    
-    // Pass data via URL query params instead of sessionStorage
+
     if (action === 'create') {
       setIsCreating(true);
       const code = Math.floor(100000 + Math.random() * 900000).toString();
-      
-      // If custom category is selected, pass the custom query
+
       let url = `/game/${code}?name=${encodeURIComponent(finalName)}&category=${encodeURIComponent(selectedCategory)}`;
       if (selectedCategory === 'custom' && customQuery.trim()) {
         url += `&customQuery=${encodeURIComponent(customQuery.trim())}`;
       }
-      
+
       router.push(url);
     } else if (action === 'join') {
       router.push(`/game/${roomCode}?name=${encodeURIComponent(finalName)}`);
@@ -67,7 +63,11 @@ export default function Home() {
 
   const handleBackFromName = () => {
     setShowNameInput(false);
-    setShowCategorySelection(true);
+    if (action === 'create') {
+      setShowCategorySelection(true);
+    } else {
+      handleBackToMain();
+    }
   };
 
   return (
@@ -125,7 +125,7 @@ export default function Home() {
             /* Name Input Screen */
             <div className="space-y-6 animate-slide-up">
               <button
-                onClick={action === 'create' ? handleBackFromName : handleBackToMain}
+                onClick={handleBackFromName}
                 className="text-sm text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 flex items-center gap-1"
               >
                 ← Back
@@ -144,7 +144,7 @@ export default function Home() {
                     type="text"
                     value={playerName}
                     onChange={(e) => setPlayerName(e.target.value.slice(0, 20))}
-                    onKeyPress={(e) => e.key === 'Enter' && handleNameSubmit()}
+                    onKeyDown={(e) => e.key === 'Enter' && handleNameSubmit()}
                     placeholder="Enter your name"
                     className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-gray-700 dark:text-white text-lg mb-4"
                     maxLength={20}
@@ -164,67 +164,68 @@ export default function Home() {
           ) : (
             /* Main Menu Screen */
             <>
-          <div className="space-y-4">
-            <h2 className="text-2xl font-semibold text-gray-800 dark:text-gray-100">
-              Start Playing
-            </h2>
-            
-            <button
-              onClick={handleCreateClick}
-              disabled={isCreating}
-              className="w-full py-4 px-6 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white rounded-xl font-semibold text-lg transition-all duration-200 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
-            >
-              {isCreating ? "Creating Room..." : "Create New Game"}
-            </button>
+              <div className="space-y-4">
+                <h2 className="text-2xl font-semibold text-gray-800 dark:text-gray-100">
+                  Start Playing
+                </h2>
+                
+                <button
+                  onClick={handleCreateClick}
+                  disabled={isCreating}
+                  className="w-full py-4 px-6 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white rounded-xl font-semibold text-lg transition-all duration-200 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
+                >
+                  {isCreating ? "Creating Room..." : "Create New Game"}
+                </button>
 
-            <div className="relative">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-gray-300 dark:border-gray-600"></div>
+                <div className="relative">
+                  <div className="absolute inset-0 flex items-center">
+                    <div className="w-full border-t border-gray-300 dark:border-gray-600"></div>
+                  </div>
+                  <div className="relative flex justify-center text-sm">
+                    <span className="px-4 bg-white dark:bg-gray-800 text-gray-500">
+                      OR
+                    </span>
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Join with Room Code
+                  </label>
+                  <input
+                    type="text"
+                    value={roomCode}
+                    onChange={(e) => setRoomCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                    placeholder="Enter 6-digit code"
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent dark:bg-gray-700 dark:text-white text-center text-2xl tracking-widest"
+                    maxLength={6}
+                  />
+                  <button
+                    onClick={handleJoinClick}
+                    disabled={roomCode.length !== 6}
+                    className="w-full py-4 px-6 bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 text-white rounded-xl font-semibold text-lg transition-all duration-200 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
+                  >
+                    Join Game
+                  </button>
+                </div>
               </div>
-              <div className="relative flex justify-center text-sm">
-                <span className="px-4 bg-white dark:bg-gray-800 text-gray-500">
-                  OR
-                </span>
+
+              <div className="pt-6 border-t border-gray-200 dark:border-gray-700">
+                <h3 className="font-semibold text-gray-800 dark:text-gray-100 mb-2">
+                  How to Play:
+                </h3>
+                <ul className="space-y-2 text-gray-600 dark:text-gray-400 text-sm">
+                  <li>• Create a game and share the invite link or room code</li>
+                  <li>• Your friend can paste the link in their browser or enter the code here</li>
+                  <li>• Each player gets a hidden 10x10 grid image</li>
+                  <li>• Take turns revealing tiles from your opponent&apos;s grid</li>
+                  <li>• First to correctly guess the opponent&apos;s image wins!</li>
+                </ul>
               </div>
-            </div>
-
-            <div className="space-y-3">
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                Enter Room Code
-              </label>
-              <input
-                type="text"
-                value={roomCode}
-                onChange={(e) => setRoomCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                placeholder="Enter 6-digit code"
-                className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-gray-700 dark:text-white text-center text-2xl tracking-widest"
-                maxLength={6}
-              />
-              <button
-                onClick={handleJoinClick}
-                disabled={roomCode.length !== 6}
-                className="w-full py-4 px-6 bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 text-white rounded-xl font-semibold text-lg transition-all duration-200 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
-              >
-                Join Game
-              </button>
-            </div>
-          </div>
-
-          <div className="pt-6 border-t border-gray-200 dark:border-gray-700">
-            <h3 className="font-semibold text-gray-800 dark:text-gray-100 mb-2">
-              How to Play:
-            </h3>
-            <ul className="space-y-2 text-gray-600 dark:text-gray-400 text-sm">
-              <li>• Each player gets a hidden 10x10 grid image</li>
-              <li>• Take turns revealing tiles from your opponent&apos;s grid</li>
-              <li>• First to correctly guess the opponent&apos;s image wins!</li>
-            </ul>
-          </div>
-          </>
+            </>
           )}
         </div>
       </div>
     </main>
   );
 }
-

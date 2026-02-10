@@ -20,7 +20,7 @@ export default function GameRoomPage() {
   const params = useParams();
   const router = useRouter();
   const roomId = params.roomId as string;
-  const { refreshProfile } = useAuth();
+  const { user, refreshProfile } = useAuth();
 
   const {
     playerIndex,
@@ -50,9 +50,35 @@ export default function GameRoomPage() {
   const [showCategoryPicker, setShowCategoryPicker] = useState(false);
   const [showDevAnswers, setShowDevAnswers] = useState(false); // DEV ONLY
 
+  // Invite link join flow: prompt for name when arriving without one
+  const [showJoinPrompt, setShowJoinPrompt] = useState(false);
+  const [joinName, setJoinName] = useState("");
+
   const showNotification = (message: string) => {
     setNotification(message);
     setTimeout(() => setNotification(null), 3000);
+  };
+
+  // Join room helper – called immediately for hosts / code-joiners,
+  // or after the name prompt for invite-link joiners.
+  const joinRoomWithName = (socketInstance: ReturnType<typeof connectSocket>, name: string) => {
+    console.log(`🎮 Joining room ${roomId} as "${name}"`);
+    socketInstance.emit("join-room", { roomId, playerName: name }, (success: boolean, index?: 0 | 1, errorMsg?: string) => {
+      if (success && index !== undefined) {
+        setPlayerIndex(index);
+      } else {
+        setError(errorMsg || "Failed to join room");
+      }
+    });
+  };
+
+  // Called when the joiner submits their name from the invite-link prompt
+  const handleJoinSubmit = () => {
+    if (!socket) return;
+    const finalName = user?.username || joinName.trim() || 'Guest';
+    if (!user && !joinName.trim()) return;
+    setShowJoinPrompt(false);
+    joinRoomWithName(socket, finalName);
   };
 
   useEffect(() => {
@@ -62,7 +88,7 @@ export default function GameRoomPage() {
 
     // Get player name and category from URL query params or use defaults
     const searchParams = new URLSearchParams(window.location.search);
-    const playerName = searchParams.get('name') || 'Player';
+    const playerName = searchParams.get('name');
     const selectedCategory = searchParams.get('category') || 'landmarks';
     const customQuery = searchParams.get('customQuery') || '';
 
@@ -73,7 +99,7 @@ export default function GameRoomPage() {
         // Room doesn't exist, create it with this roomId
         const roomData = { 
           roomId, 
-          playerName, 
+          playerName: playerName || 'Player', 
           category: selectedCategory,
           ...(customQuery && { customQuery })
         };
@@ -93,17 +119,14 @@ export default function GameRoomPage() {
           }
         });
       } else if (room.gameState === 'waiting' && room.players.length === 1) {
-        // Room exists with one player, join as second player
-        console.log(`🎮 Joining room with category: ${room.category || 'unknown'}`);
-        socketInstance.emit("join-room", { roomId, playerName }, (success: boolean, index?: 0 | 1, errorMsg?: string) => {
-          if (success && index !== undefined) {
-            setPlayerIndex(index);
-            // Game will start automatically via game-start event
-            // No need to fetch state here as it will be fetched in the game-start handler
-          } else {
-            setError(errorMsg || "Failed to join room");
-          }
-        });
+        // Room exists with one player – this is a joiner
+        if (playerName) {
+          // Name provided via URL (e.g. from the landing page join flow)
+          joinRoomWithName(socketInstance, playerName);
+        } else {
+          // No name in URL – arrived via invite link, show name prompt
+          setShowJoinPrompt(true);
+        }
       } else if (room.gameState === 'playing' && room.players.length === 2) {
         // Game already in progress
         setError("Game is already in progress with 2 players");
@@ -452,6 +475,58 @@ export default function GameRoomPage() {
     );
   }
 
+  // Invite-link join prompt: ask the joiner for their name before connecting
+  if (showJoinPrompt) {
+    return (
+      <main className="min-h-screen flex items-center justify-center p-8">
+        <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl p-8 max-w-md w-full">
+          <div className="text-center mb-6">
+            <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-2">
+              GridGuesser
+            </h1>
+            <p className="text-gray-600 dark:text-gray-400">
+              You&apos;ve been invited to join a game!
+            </p>
+          </div>
+
+          <div className="space-y-4">
+            <h2 className="text-xl font-semibold text-gray-800 dark:text-gray-100">
+              {user ? `Ready to play, ${user.username}?` : "Enter your name"}
+            </h2>
+
+            {!user && (
+              <input
+                type="text"
+                value={joinName}
+                onChange={(e) => setJoinName(e.target.value.slice(0, 20))}
+                onKeyDown={(e) => e.key === "Enter" && handleJoinSubmit()}
+                placeholder="Your name"
+                className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-gray-700 dark:text-white text-lg"
+                maxLength={20}
+                autoFocus
+              />
+            )}
+
+            <button
+              onClick={handleJoinSubmit}
+              disabled={!user && joinName.trim().length === 0}
+              className="w-full py-4 px-6 bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 text-white rounded-xl font-semibold text-lg transition-all duration-200 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
+            >
+              Join Game
+            </button>
+
+            <button
+              onClick={() => router.push("/")}
+              className="w-full py-3 px-6 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 rounded-xl font-medium transition-colors"
+            >
+              Back to Home
+            </button>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
   if (!gameRoom || playerIndex === null) {
     return (
       <main className="min-h-screen flex items-center justify-center p-8">
@@ -463,8 +538,9 @@ export default function GameRoomPage() {
             Connecting...
           </h2>
           <p className="text-gray-600 dark:text-gray-400">
-            Room Code: <span className="font-mono font-bold text-2xl">{roomId}</span>
+            Waiting for opponent to join...
           </p>
+          <RoomCodeDisplay roomCode={roomId} />
         </div>
       </main>
     );
