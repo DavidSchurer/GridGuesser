@@ -22,15 +22,9 @@ interface PowerUpsSidebarProps {
   isFrozen?: boolean; // player is frozen and can't use power-ups this turn
 }
 
+const ITEMS_PER_PAGE = 3;
+
 const powerUps: PowerUp[] = [
-  {
-    id: 'skip',
-    name: 'Skip Turn',
-    cost: 5,
-    description: 'Opponent skips their next turn',
-    icon: 'clock',
-    activation: 'instant',
-  },
   {
     id: 'peek',
     name: 'Peek',
@@ -38,6 +32,14 @@ const powerUps: PowerUp[] = [
     description: 'Glimpse a 3x3 area for 5 seconds',
     icon: 'peek',
     activation: 'selectTile',
+  },
+  {
+    id: 'skip',
+    name: 'Skip Turn',
+    cost: 5,
+    description: 'Opponent skips their next turn',
+    icon: 'clock',
+    activation: 'instant',
   },
   {
     id: 'revealLine',
@@ -91,6 +93,10 @@ export default function PowerUpsSidebar({
 }: PowerUpsSidebarProps) {
   const [selectedPowerUp, setSelectedPowerUp] = useState<string | null>(null);
   const [lineSelectionMode, setLineSelectionMode] = useState<'row' | 'col' | null>(null);
+  const [page, setPage] = useState(0);
+
+  const totalPages = Math.ceil(powerUps.length / ITEMS_PER_PAGE);
+  const visiblePowerUps = powerUps.slice(page * ITEMS_PER_PAGE, (page + 1) * ITEMS_PER_PAGE);
 
   const handlePowerUpClick = (powerUp: PowerUp) => {
     if (disabled || isFrozen || myPoints < powerUp.cost || !isMyTurn) return;
@@ -228,9 +234,9 @@ export default function PowerUpsSidebar({
         </div>
       )}
 
-      {/* Power-Ups List */}
+      {/* Power-Ups List (paginated) */}
       <div className="space-y-3">
-        {powerUps.map((powerUp) => {
+        {visiblePowerUps.map((powerUp) => {
           const affordable = canAfford(powerUp.cost);
           const isSelected = selectedPowerUp === powerUp.id;
           const canUse = affordable && isMyTurn && !disabled && !isFrozen;
@@ -278,8 +284,49 @@ export default function PowerUpsSidebar({
         })}
       </div>
 
+      {/* Pagination Controls */}
+      <div className="flex items-center justify-between pt-2">
+        <button
+          onClick={() => setPage((p) => Math.max(0, p - 1))}
+          disabled={page === 0}
+          className={`
+            p-2 rounded-lg transition-colors
+            ${page === 0
+              ? 'text-gray-300 dark:text-gray-600 cursor-not-allowed'
+              : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer'
+            }
+          `}
+          aria-label="Previous power-ups"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+          </svg>
+        </button>
+
+        <span className="text-sm text-gray-500 dark:text-gray-400 font-medium">
+          {page + 1} / {totalPages}
+        </span>
+
+        <button
+          onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+          disabled={page === totalPages - 1}
+          className={`
+            p-2 rounded-lg transition-colors
+            ${page === totalPages - 1
+              ? 'text-gray-300 dark:text-gray-600 cursor-not-allowed'
+              : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer'
+            }
+          `}
+          aria-label="Next power-ups"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+          </svg>
+        </button>
+      </div>
+
       {/* Info Footer */}
-      <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
+      <div className="pt-2 border-t border-gray-200 dark:border-gray-700">
         <p className="text-xs text-gray-500 dark:text-gray-400">
           Earn points by revealing tiles on opponent&apos;s grid!
         </p>
