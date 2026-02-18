@@ -52,6 +52,7 @@ export default function GameRoomPage() {
   // New power-up states
   const [peekTiles, setPeekTiles] = useState<number[]>([]); // tiles temporarily visible via Peek
   const [isFrozen, setIsFrozen] = useState(false); // whether this player is frozen
+  const [lineDirection, setLineDirection] = useState<'row' | 'col'>('col'); // revealLine direction
 
   // Invite link join flow: prompt for name when arriving without one
   const [showJoinPrompt, setShowJoinPrompt] = useState(false);
@@ -368,6 +369,7 @@ export default function GameRoomPage() {
       setPeekTiles([]);
       setIsFrozen(false);
       setSelectedPowerUp(null);
+      setLineDirection('col');
       
       // Increment reset key to force full component remount
       setGameResetKey(prev => {
@@ -455,6 +457,23 @@ export default function GameRoomPage() {
     };
   }, [roomId]); // Only re-run if roomId changes
 
+  // Keyboard listener for revealLine mode: R for row, C for column
+  useEffect(() => {
+    if (selectedPowerUp !== 'revealLine') return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const key = e.key.toLowerCase();
+      if (key === 'r') {
+        setLineDirection('row');
+      } else if (key === 'c') {
+        setLineDirection('col');
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedPowerUp]);
+
   const handleTileClick = (tileIndex: number) => {
     if (!socket || playerIndex === null || !gameRoom) return;
 
@@ -469,6 +488,17 @@ export default function GameRoomPage() {
     if (selectedPowerUp === 'peek') {
       handleUsePowerUp('peek', tileIndex);
       setSelectedPowerUp(null);
+      return;
+    }
+
+    // If revealLine is selected, compute the row/col index from the tile
+    if (selectedPowerUp === 'revealLine') {
+      const lineIndex = lineDirection === 'row'
+        ? Math.floor(tileIndex / 10)
+        : tileIndex % 10;
+      handleUsePowerUp('revealLine', undefined, lineDirection, lineIndex);
+      setSelectedPowerUp(null);
+      setLineDirection('col');
       return;
     }
 
@@ -488,9 +518,10 @@ export default function GameRoomPage() {
       return;
     }
 
-    // For power-ups that need tile selection, just enter selection mode
-    if ((powerUpId === 'reveal2x2' || powerUpId === 'peek') && tileIndex === undefined) {
+    // For power-ups that need tile/grid selection, just enter selection mode
+    if ((powerUpId === 'reveal2x2' || powerUpId === 'peek' || powerUpId === 'revealLine') && tileIndex === undefined && lineType === undefined) {
       setSelectedPowerUp(powerUpId);
+      if (powerUpId === 'revealLine') setLineDirection('col');
       return;
     }
 
@@ -743,6 +774,8 @@ export default function GameRoomPage() {
               reveal2x2Mode={selectedPowerUp === 'reveal2x2'}
               peekMode={selectedPowerUp === 'peek'}
               peekTiles={peekTiles}
+              revealLineMode={selectedPowerUp === 'revealLine'}
+              lineDirection={lineDirection}
             />
 
             {/* Word Hint Display */}

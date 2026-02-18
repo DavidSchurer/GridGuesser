@@ -47,7 +47,7 @@ const powerUps: PowerUp[] = [
     cost: 6,
     description: 'Reveal an entire row or column',
     icon: 'revealLine',
-    activation: 'selectLine',
+    activation: 'selectTile',
   },
   {
     id: 'freeze',
@@ -92,7 +92,6 @@ export default function PowerUpsSidebar({
   isFrozen = false,
 }: PowerUpsSidebarProps) {
   const [selectedPowerUp, setSelectedPowerUp] = useState<string | null>(null);
-  const [lineSelectionMode, setLineSelectionMode] = useState<'row' | 'col' | null>(null);
   const [page, setPage] = useState(0);
 
   const totalPages = Math.ceil(powerUps.length / ITEMS_PER_PAGE);
@@ -102,14 +101,8 @@ export default function PowerUpsSidebar({
     if (disabled || isFrozen || myPoints < powerUp.cost || !isMyTurn) return;
 
     if (powerUp.activation === 'selectTile') {
-      // Needs tile selection on the grid (reveal2x2, peek)
       setSelectedPowerUp(powerUp.id);
-      setLineSelectionMode(null);
       onUsePowerUp(powerUp.id); // Notify parent to enter tile-select mode
-    } else if (powerUp.activation === 'selectLine') {
-      // Needs row/column selection
-      setSelectedPowerUp(powerUp.id);
-      setLineSelectionMode(null); // Will be set when user picks row or col
     } else {
       // Instant power-ups
       onUsePowerUp(powerUp.id);
@@ -117,15 +110,8 @@ export default function PowerUpsSidebar({
     }
   };
 
-  const handleLineSelect = (type: 'row' | 'col', index: number) => {
-    onUsePowerUp('revealLine', undefined, type, index);
-    setSelectedPowerUp(null);
-    setLineSelectionMode(null);
-  };
-
   const handleCancel = () => {
     setSelectedPowerUp(null);
-    setLineSelectionMode(null);
     onUsePowerUp('cancel');
   };
 
@@ -193,43 +179,13 @@ export default function PowerUpsSidebar({
         </div>
       )}
 
-      {selectedPowerUp === 'revealLine' && !lineSelectionMode && (
+      {selectedPowerUp === 'revealLine' && (
         <div className="bg-teal-100 dark:bg-teal-900 border-2 border-teal-400 dark:border-teal-600 rounded-lg p-4 animate-fade-in">
-          <p className="text-sm text-teal-900 dark:text-teal-100 font-bold mb-2">Reveal what?</p>
-          <div className="flex gap-2 mb-2">
-            <button
-              onClick={() => setLineSelectionMode('row')}
-              className="flex-1 py-2 px-3 bg-teal-500 hover:bg-teal-600 text-white text-sm font-semibold rounded transition-colors"
-            >
-              Row
-            </button>
-            <button
-              onClick={() => setLineSelectionMode('col')}
-              className="flex-1 py-2 px-3 bg-teal-500 hover:bg-teal-600 text-white text-sm font-semibold rounded transition-colors"
-            >
-              Column
-            </button>
-          </div>
-          <button onClick={handleCancel} className="text-xs text-teal-700 dark:text-teal-300 bg-teal-200 dark:bg-teal-800 px-2 py-1 rounded hover:bg-teal-300 dark:hover:bg-teal-700 transition-colors">Cancel</button>
-        </div>
-      )}
-
-      {selectedPowerUp === 'revealLine' && lineSelectionMode && (
-        <div className="bg-teal-100 dark:bg-teal-900 border-2 border-teal-400 dark:border-teal-600 rounded-lg p-4 animate-fade-in">
-          <p className="text-sm text-teal-900 dark:text-teal-100 font-bold mb-2">
-            Pick {lineSelectionMode === 'row' ? 'a row' : 'a column'} (1-10):
+          <p className="text-sm text-teal-900 dark:text-teal-100 font-bold mb-1">Reveal Row/Col Mode</p>
+          <p className="text-xs text-teal-800 dark:text-teal-200 mb-1">Hover over the grid to preview. Click to reveal.</p>
+          <p className="text-xs text-teal-800 dark:text-teal-200 mb-2">
+            Press <kbd className="px-1.5 py-0.5 bg-teal-200 dark:bg-teal-800 rounded font-mono font-bold">R</kbd> for row, <kbd className="px-1.5 py-0.5 bg-teal-200 dark:bg-teal-800 rounded font-mono font-bold">C</kbd> for column.
           </p>
-          <div className="grid grid-cols-5 gap-1 mb-2">
-            {Array.from({ length: 10 }, (_, i) => (
-              <button
-                key={i}
-                onClick={() => handleLineSelect(lineSelectionMode, i)}
-                className="py-1.5 bg-teal-500 hover:bg-teal-600 text-white text-sm font-bold rounded transition-colors"
-              >
-                {i + 1}
-              </button>
-            ))}
-          </div>
           <button onClick={handleCancel} className="text-xs text-teal-700 dark:text-teal-300 bg-teal-200 dark:bg-teal-800 px-2 py-1 rounded hover:bg-teal-300 dark:hover:bg-teal-700 transition-colors">Cancel</button>
         </div>
       )}

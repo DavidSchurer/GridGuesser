@@ -14,6 +14,8 @@ interface GameGridProps {
   reveal2x2Mode?: boolean;
   peekMode?: boolean;
   peekTiles?: number[]; // tiles temporarily visible via Peek power-up
+  revealLineMode?: boolean;
+  lineDirection?: 'row' | 'col';
 }
 
 export default function GameGrid({
@@ -26,6 +28,8 @@ export default function GameGrid({
   reveal2x2Mode = false,
   peekMode = false,
   peekTiles = [],
+  revealLineMode = false,
+  lineDirection = 'col',
 }: GameGridProps) {
   const [loadingTile, setLoadingTile] = useState<number | null>(null);
   const [hoveredTile, setHoveredTile] = useState<number | null>(null);
@@ -44,8 +48,8 @@ export default function GameGrid({
       return;
     }
 
-    // In reveal2x2 or peekMode, allow clicking on any tile (even revealed ones)
-    if (!reveal2x2Mode && !peekMode && revealedTiles.includes(tileIndex)) {
+    // In reveal2x2, peekMode, or revealLineMode, allow clicking on any tile (even revealed ones)
+    if (!reveal2x2Mode && !peekMode && !revealLineMode && revealedTiles.includes(tileIndex)) {
       return;
     }
     
@@ -91,6 +95,18 @@ export default function GameGrid({
     return tiles;
   };
 
+  // Get all tiles in the same row as the given tile
+  const getRowTiles = (tileIndex: number): number[] => {
+    const row = Math.floor(tileIndex / 10);
+    return Array.from({ length: 10 }, (_, c) => row * 10 + c);
+  };
+
+  // Get all tiles in the same column as the given tile
+  const getColTiles = (tileIndex: number): number[] => {
+    const col = tileIndex % 10;
+    return Array.from({ length: 10 }, (_, r) => r * 10 + col);
+  };
+
   // Check if a tile should be highlighted in 2x2 mode
   const isIn2x2Area = (tileIndex: number): boolean => {
     if (!reveal2x2Mode || hoveredTile === null || !isOpponentGrid) {
@@ -107,16 +123,25 @@ export default function GameGrid({
     return get3x3Tiles(hoveredTile).includes(tileIndex);
   };
 
+  // Check if a tile should be highlighted in revealLine mode
+  const isInLineArea = (tileIndex: number): boolean => {
+    if (!revealLineMode || hoveredTile === null || !isOpponentGrid) {
+      return false;
+    }
+    const lineTiles = lineDirection === 'row' ? getRowTiles(hoveredTile) : getColTiles(hoveredTile);
+    return lineTiles.includes(tileIndex);
+  };
+
   // Handle mouse enter on a tile
   const handleTileHover = (tileIndex: number) => {
-    if ((reveal2x2Mode || peekMode) && isOpponentGrid) {
+    if ((reveal2x2Mode || peekMode || revealLineMode) && isOpponentGrid) {
       setHoveredTile(tileIndex);
     }
   };
 
   // Handle mouse leave from the entire grid
   const handleGridMouseLeave = () => {
-    if ((reveal2x2Mode || peekMode) && isOpponentGrid) {
+    if ((reveal2x2Mode || peekMode || revealLineMode) && isOpponentGrid) {
       setHoveredTile(null);
     }
   };
@@ -138,23 +163,24 @@ export default function GameGrid({
           const isRevealed = revealedTiles.includes(index);
           const isPeeking = peekTiles.includes(index); // temporarily visible via Peek
           const showImage = isRevealed || isPeeking;
-          const isClickable = isOpponentGrid && isMyTurn && !disabled && (reveal2x2Mode || peekMode || !isRevealed);
+          const isClickable = isOpponentGrid && isMyTurn && !disabled && (reveal2x2Mode || peekMode || revealLineMode || !isRevealed);
           const isLoading = loadingTile === index;
           const isIn2x2 = isIn2x2Area(index);
           const isInPeek = isInPeekArea(index);
+          const isInLine = isInLineArea(index);
 
           return (
             <motion.div
               key={`${imageHash}-tile-${index}`}
               onClick={() => handleTileClick(index)}
               onMouseEnter={() => handleTileHover(index)}
-              whileHover={isClickable && !reveal2x2Mode && !peekMode ? { scale: 1.05, zIndex: 10 } : {}}
+              whileHover={isClickable && !reveal2x2Mode && !peekMode && !revealLineMode ? { scale: 1.05, zIndex: 10 } : {}}
               whileTap={isClickable ? { scale: 0.95 } : {}}
               className={`
                 tile relative
                 ${showImage ? 'revealed' : ''}
-                ${isClickable && !reveal2x2Mode && !peekMode ? 'cursor-pointer' : ''}
-                ${isClickable && (reveal2x2Mode || peekMode) ? 'cursor-crosshair' : ''}
+                ${isClickable && !reveal2x2Mode && !peekMode && !revealLineMode ? 'cursor-pointer' : ''}
+                ${isClickable && (reveal2x2Mode || peekMode || revealLineMode) ? 'cursor-crosshair' : ''}
                 ${!isClickable && !showImage ? 'bg-gray-300 dark:bg-gray-700' : ''}
                 ${disabled ? 'disabled' : ''}
                 ${isLoading ? 'animate-pulse' : ''}
@@ -162,6 +188,8 @@ export default function GameGrid({
                 ${isIn2x2 && isRevealed ? 'ring-4 ring-purple-400 scale-[1.05] z-[25]' : ''}
                 ${isInPeek && !isRevealed ? '!bg-amber-300 dark:!bg-amber-700 ring-4 ring-amber-500 scale-[1.08] z-[30] shadow-2xl' : ''}
                 ${isInPeek && isRevealed ? 'ring-4 ring-amber-400 scale-[1.05] z-[25]' : ''}
+                ${isInLine && !isRevealed ? '!bg-teal-300 dark:!bg-teal-700 ring-4 ring-teal-500 scale-[1.08] z-[30] shadow-2xl' : ''}
+                ${isInLine && isRevealed ? 'ring-4 ring-teal-400 scale-[1.05] z-[25]' : ''}
                 ${isPeeking && !isRevealed ? 'ring-2 ring-amber-400 z-[20]' : ''}
                 transition-all duration-150 ease-out
               `}
@@ -214,6 +242,13 @@ export default function GameGrid({
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 0.4 }}
                         className="absolute inset-0 bg-amber-500 pointer-events-none"
+                      />
+                    )}
+                    {isInLine && revealLineMode && (
+                      <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 0.4 }}
+                        className="absolute inset-0 bg-teal-500 pointer-events-none"
                       />
                     )}
                   </motion.div>
