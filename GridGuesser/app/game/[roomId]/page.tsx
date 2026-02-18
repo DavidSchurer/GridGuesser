@@ -188,6 +188,10 @@ export default function GameRoomPage() {
         socketInstance.emit("get-game-state", roomId, (room: GameRoom | null) => {
           if (room) {
             setGameRoom(room);
+            const idx = useGameStore.getState().playerIndex;
+            if (room.freezeActive && idx !== null) {
+              setIsFrozen(room.freezeActive[idx]);
+            }
           }
         });
       }, 100);
