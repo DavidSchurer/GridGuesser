@@ -49,6 +49,9 @@ export default function GameRoomPage() {
   const [opponentRematchCustomQuery, setOpponentRematchCustomQuery] = useState<string | null>(null);
   const [showCategoryPicker, setShowCategoryPicker] = useState(false);
 
+  // Revealed image names shown after game ends
+  const [revealedImageNames, setRevealedImageNames] = useState<[string, string] | null>(null);
+
   // New power-up states
   const [peekTiles, setPeekTiles] = useState<number[]>([]); // tiles temporarily visible via Peek
   const [isFrozen, setIsFrozen] = useState(false); // whether this player is frozen
@@ -363,9 +366,14 @@ export default function GameRoomPage() {
     });
 
     // Listen for game end
-    socketInstance.on("game-end", (data: { winner: number; winnerGuess: string; correctAnswer: string }) => {
+    socketInstance.on("game-end", (data: { winner: number; winnerGuess: string; correctAnswer: string; imageNames?: [string, string] }) => {
       // Game is over — clear the rejoin session
       clearActiveGame();
+
+      // Store both image names so they can be displayed
+      if (data.imageNames) {
+        setRevealedImageNames(data.imageNames);
+      }
 
       const currentPlayerIndex = useGameStore.getState().playerIndex;
       
@@ -375,25 +383,40 @@ export default function GameRoomPage() {
           : `You lost! The answer was: ${data.correctAnswer}`
       );
 
-      // Update game state
+      // Fully reveal all tiles on both grids so players can see the images
+      const currentRoom = useGameStore.getState().gameRoom;
+      const allTiles = Array.from({ length: 100 }, (_, i) => i);
+      if (currentRoom) {
+        setGameRoom({
+          ...currentRoom,
+          gameState: 'finished',
+          revealedTiles: [allTiles, allTiles],
+          winner: data.winner as 0 | 1,
+        });
+      }
+
+      // Also fetch the official state from server
       socketInstance.emit("get-game-state", roomId, (room: GameRoom | null) => {
         if (room) {
-          setGameRoom(room);
+          setGameRoom({
+            ...room,
+            revealedTiles: [allTiles, allTiles],
+          });
         }
       });
 
       // Refresh user profile to get updated stats
       refreshProfile().catch(error => console.error("Error refreshing profile:", error));
       
-      // Show rematch modal after a short delay – pre-fill category from current game
+      // Show rematch modal after 6 seconds so players can see both full images and answers
       setTimeout(() => {
-        const currentRoom = useGameStore.getState().gameRoom;
-        if (currentRoom?.category) {
-          setRematchCategory(currentRoom.category);
-          setRematchCustomQuery(currentRoom.customQuery || '');
+        const latestRoom = useGameStore.getState().gameRoom;
+        if (latestRoom?.category) {
+          setRematchCategory(latestRoom.category);
+          setRematchCustomQuery(latestRoom.customQuery || '');
         }
         setShowRematchModal(true);
-      }, 2000);
+      }, 6000);
     });
 
     // Listen for rematch requests
@@ -425,6 +448,7 @@ export default function GameRoomPage() {
       setIsFrozen(false);
       setSelectedPowerUp(null);
       setLineDirection('col');
+      setRevealedImageNames(null);
       
       // Increment reset key to force full component remount
       setGameResetKey(prev => {
@@ -839,6 +863,16 @@ export default function GameRoomPage() {
               lineDirection={lineDirection}
             />
 
+            {/* Revealed answer after game ends */}
+            {gameRoom.gameState === 'finished' && revealedImageNames && playerIndex !== null && (
+              <div className="mt-4 w-full max-w-[600px]">
+                <div className="bg-green-100 dark:bg-green-900/30 border border-green-300 dark:border-green-700 rounded-lg px-4 py-3 text-center">
+                  <p className="text-xs text-green-600 dark:text-green-400 mb-1 font-medium">Answer</p>
+                  <p className="text-2xl font-bold text-green-700 dark:text-green-300 capitalize">{revealedImageNames[1 - playerIndex]}</p>
+                </div>
+              </div>
+            )}
+
             {/* Word Hint Display */}
             {gameRoom.gameState === 'playing' && gameRoom.maskedImageNames && playerIndex !== null && (
               <div className="mt-4 w-full max-w-[600px]">
@@ -884,6 +918,16 @@ export default function GameRoomPage() {
               isOpponentGrid={false}
               disabled={true}
             />
+
+            {/* Revealed answer after game ends */}
+            {gameRoom.gameState === 'finished' && revealedImageNames && playerIndex !== null && (
+              <div className="mt-4 w-full max-w-[600px]">
+                <div className="bg-blue-100 dark:bg-blue-900/30 border border-blue-300 dark:border-blue-700 rounded-lg px-4 py-3 text-center">
+                  <p className="text-xs text-blue-600 dark:text-blue-400 mb-1 font-medium">Answer</p>
+                  <p className="text-2xl font-bold text-blue-700 dark:text-blue-300 capitalize">{revealedImageNames[playerIndex]}</p>
+                </div>
+              </div>
+            )}
               </div>
             </div>
 

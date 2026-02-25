@@ -649,11 +649,12 @@ io.on("connection", (socket: Socket) => {
         console.log(`Guest player lost - no stats to update`);
       }
 
-      // Broadcast game end
+      // Broadcast game end with both image names revealed
       io.to(roomId).emit("game-end", {
         winner: playerIndex,
         winnerGuess: guess,
         correctAnswer: correctAnswer,
+        imageNames: room.imageNames,
       });
 
       callback(true, true);
