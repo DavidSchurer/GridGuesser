@@ -70,6 +70,12 @@ export default function GameRoomPage() {
     socketInstance.emit("join-room", { roomId, playerName: name }, (success: boolean, index?: 0 | 1, errorMsg?: string) => {
       if (success && index !== undefined) {
         setPlayerIndex(index);
+        // Fetch room to get our player ID for rejoin support
+        socketInstance.emit("get-game-state", roomId, (room: GameRoom | null) => {
+          if (room && room.players[index]) {
+            saveActiveGame(index, room.players[index].id);
+          }
+        });
       } else {
         setError(errorMsg || "Failed to join room");
       }
@@ -85,6 +91,17 @@ export default function GameRoomPage() {
     joinRoomWithName(socket, finalName);
   };
 
+  // Save active game to localStorage so the home page can offer rejoin
+  const saveActiveGame = (pIndex: 0 | 1, playerId: string) => {
+    try {
+      localStorage.setItem('gridguesser_active_game', JSON.stringify({ roomId, playerIndex: pIndex, playerId }));
+    } catch {}
+  };
+
+  const clearActiveGame = () => {
+    try { localStorage.removeItem('gridguesser_active_game'); } catch {}
+  };
+
   useEffect(() => {
     const socketInstance = connectSocket();
     setSocket(socketInstance);
@@ -95,11 +112,21 @@ export default function GameRoomPage() {
     const playerName = searchParams.get('name');
     const selectedCategory = searchParams.get('category') || 'landmarks';
     const customQuery = searchParams.get('customQuery') || '';
+    const isRejoin = searchParams.get('rejoin') === '1';
+
+    // Check if this is a rejoin attempt
+    const savedGame = (() => { try { return JSON.parse(localStorage.getItem('gridguesser_active_game') || 'null'); } catch { return null; } })();
+    const canTryRejoin = isRejoin && savedGame?.roomId === roomId && savedGame?.playerId;
 
     // Try to create the room with the specific roomId
     // First check if room exists
     socketInstance.emit("get-game-state", roomId, (room: GameRoom | null) => {
       if (!room) {
+        if (canTryRejoin) {
+          clearActiveGame();
+          setError("Game no longer exists");
+          return;
+        }
         // Room doesn't exist, create it with this roomId
         const roomData = { 
           roomId, 
@@ -112,27 +139,43 @@ export default function GameRoomPage() {
           if (success) {
             setPlayerIndex(0);
             console.log(`✅ Room created with category: ${selectedCategory}${customQuery ? ` (custom: "${customQuery}")` : ''}`);
-            // Fetch the newly created room state
             socketInstance.emit("get-game-state", roomId, (newRoom: GameRoom | null) => {
               if (newRoom) {
                 setGameRoom(newRoom);
+                // Save session for rejoin — player id is in the room data
+                if (newRoom.players[0]) saveActiveGame(0, newRoom.players[0].id);
               }
             });
           } else {
             setError(errorMsg || "Failed to create room");
           }
         });
+      } else if (canTryRejoin && room.players.length === 2) {
+        // Rejoin: player was in this game and is coming back
+        socketInstance.emit("rejoin-room", { roomId, playerId: savedGame.playerId }, (success: boolean, pIndex?: 0 | 1, errMsg?: string) => {
+          if (success && pIndex !== undefined) {
+            setPlayerIndex(pIndex);
+            setOpponentConnected(true);
+            socketInstance.emit("get-game-state", roomId, (freshRoom: GameRoom | null) => {
+              if (freshRoom) {
+                setGameRoom(freshRoom);
+                saveActiveGame(pIndex, savedGame.playerId);
+              }
+            });
+            showNotification("Reconnected to game!");
+          } else {
+            clearActiveGame();
+            setError(errMsg || "Failed to rejoin game");
+          }
+        });
       } else if (room.gameState === 'waiting' && room.players.length === 1) {
         // Room exists with one player – this is a joiner
         if (playerName) {
-          // Name provided via URL (e.g. from the landing page join flow)
           joinRoomWithName(socketInstance, playerName);
         } else {
-          // No name in URL – arrived via invite link, show name prompt
           setShowJoinPrompt(true);
         }
       } else if (room.gameState === 'playing' && room.players.length === 2) {
-        // Game already in progress
         setError("Game is already in progress with 2 players");
       } else {
         setError("Unable to join this room");
@@ -315,7 +358,9 @@ export default function GameRoomPage() {
 
     // Listen for game end
     socketInstance.on("game-end", (data: { winner: number; winnerGuess: string; correctAnswer: string }) => {
-      // Get current playerIndex from store to avoid stale closure value
+      // Game is over — clear the rejoin session
+      clearActiveGame();
+
       const currentPlayerIndex = useGameStore.getState().playerIndex;
       
       showNotification(
@@ -452,6 +497,12 @@ export default function GameRoomPage() {
     // Listen for player disconnection
     socketInstance.on("player-disconnected", (data: { playerIndex: number; message: string }) => {
       setOpponentConnected(false);
+      showNotification(data.message);
+    });
+
+    // Listen for player reconnection
+    socketInstance.on("player-reconnected", (data: { playerIndex: number; message: string }) => {
+      setOpponentConnected(true);
       showNotification(data.message);
     });
 
@@ -692,7 +743,7 @@ export default function GameRoomPage() {
         {/* Header */}
         <div className="mb-6 flex justify-between items-center">
           <button
-            onClick={() => router.push("/")}
+            onClick={() => { clearActiveGame(); router.push("/"); }}
             className="px-4 py-2 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 rounded-lg transition-colors"
           >
             ← Leave Game

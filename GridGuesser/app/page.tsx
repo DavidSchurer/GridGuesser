@@ -1,10 +1,21 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { motion, AnimatePresence } from "framer-motion";
 import UserProfile from "../components/UserProfile";
 import CategorySelector from "../components/CategorySelector";
 import { useAuth } from "../lib/authContext";
+import { connectSocket, disconnectSocket } from "../lib/socket";
+
+interface RejoinInfo {
+  roomId: string;
+  gameState: string;
+  playerIndex: number;
+  playerName: string;
+  opponentName: string | null;
+  category?: string;
+}
 
 export default function Home() {
   const [roomCode, setRoomCode] = useState("");
@@ -15,8 +26,42 @@ export default function Home() {
   const [selectedCategory, setSelectedCategory] = useState("landmarks");
   const [customQuery, setCustomQuery] = useState("");
   const [action, setAction] = useState<'create' | 'join' | null>(null);
+  const [rejoinInfo, setRejoinInfo] = useState<RejoinInfo | null>(null);
   const router = useRouter();
   const { user } = useAuth();
+
+  // On mount, check localStorage for an active game and verify it with the server
+  useEffect(() => {
+    let savedGame: { roomId: string; playerIndex: number; playerId: string } | null = null;
+    try {
+      savedGame = JSON.parse(localStorage.getItem('gridguesser_active_game') || 'null');
+    } catch {}
+
+    if (!savedGame?.roomId || !savedGame?.playerId) return;
+
+    const sock = connectSocket();
+
+    sock.emit("check-rejoin", { roomId: savedGame.roomId, playerId: savedGame.playerId }, (canRejoin: boolean, info?: RejoinInfo) => {
+      if (canRejoin && info) {
+        setRejoinInfo(info);
+      } else {
+        localStorage.removeItem('gridguesser_active_game');
+      }
+      disconnectSocket();
+    });
+
+    return () => { disconnectSocket(); };
+  }, []);
+
+  const handleRejoin = () => {
+    if (!rejoinInfo) return;
+    router.push(`/game/${rejoinInfo.roomId}?rejoin=1`);
+  };
+
+  const handleDismissRejoin = () => {
+    localStorage.removeItem('gridguesser_active_game');
+    setRejoinInfo(null);
+  };
 
   const handleCreateClick = () => {
     setAction('create');
@@ -225,6 +270,51 @@ export default function Home() {
             </>
           )}
         </div>
+
+        {/* Rejoin Popup */}
+        <AnimatePresence>
+          {rejoinInfo && (
+            <motion.div
+              initial={{ opacity: 0, y: 30, scale: 0.95 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 20, scale: 0.95 }}
+              transition={{ type: "spring", stiffness: 300, damping: 25 }}
+              className="mt-6 bg-gradient-to-br from-amber-50 to-orange-50 dark:from-amber-900/30 dark:to-orange-900/20 border border-amber-300 dark:border-amber-700 rounded-2xl shadow-xl p-6"
+            >
+              <div className="flex items-start gap-4">
+                <div className="text-3xl shrink-0">&#9889;</div>
+                <div className="flex-1 min-w-0">
+                  <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100 mb-1">
+                    Game in progress
+                  </h3>
+                  <p className="text-sm text-gray-700 dark:text-gray-300 mb-1">
+                    You have an active game in room <span className="font-mono font-bold">{rejoinInfo.roomId}</span>
+                  </p>
+                  {rejoinInfo.opponentName && (
+                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                      Playing against <span className="font-semibold">{rejoinInfo.opponentName}</span>
+                      {rejoinInfo.category && <> &middot; {rejoinInfo.category}</>}
+                    </p>
+                  )}
+                  <div className="flex gap-3 mt-4">
+                    <button
+                      onClick={handleRejoin}
+                      className="flex-1 py-3 px-5 bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white rounded-xl font-semibold transition-all duration-200 transform hover:scale-105"
+                    >
+                      Rejoin Game
+                    </button>
+                    <button
+                      onClick={handleDismissRejoin}
+                      className="py-3 px-5 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 rounded-xl font-medium transition-colors"
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     </main>
   );

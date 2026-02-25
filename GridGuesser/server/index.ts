@@ -1142,28 +1142,81 @@ io.on("connection", (socket: Socket) => {
     }
   });
 
-  // Handle disconnection
+  // ─── Rejoin Support ────────────────────────────────────────────────────
+
+  // Check if a player can rejoin an active game
+  socket.on("check-rejoin", async (data: { roomId: string; playerId: string }, callback: (canRejoin: boolean, room?: any) => void) => {
+    try {
+      const room = await getGameRoom(data.roomId);
+      if (!room) { callback(false); return; }
+
+      // Room must still be playing or waiting
+      if (room.gameState === 'finished') { callback(false); return; }
+
+      const playerIndex = room.players.findIndex((p: Player) => p.id === data.playerId);
+      if (playerIndex === -1) { callback(false); return; }
+
+      console.log(`🔍 Rejoin check: Player "${room.players[playerIndex].name}" can rejoin room ${data.roomId}`);
+      callback(true, {
+        roomId: room.roomId,
+        gameState: room.gameState,
+        playerIndex,
+        playerName: room.players[playerIndex].name,
+        opponentName: room.players[1 - playerIndex]?.name || null,
+        category: room.category,
+      });
+    } catch (error) {
+      console.error("Error checking rejoin:", error);
+      callback(false);
+    }
+  });
+
+  // Rejoin an active game room
+  socket.on("rejoin-room", async (data: { roomId: string; playerId: string }, callback: (success: boolean, playerIndex?: 0 | 1, error?: string) => void) => {
+    try {
+      const room = await getGameRoom(data.roomId);
+      if (!room) { callback(false, undefined, "Room no longer exists"); return; }
+      if (room.gameState === 'finished') { callback(false, undefined, "Game already finished"); return; }
+
+      const playerIndex = room.players.findIndex((p: Player) => p.id === data.playerId);
+      if (playerIndex === -1) { callback(false, undefined, "Player not found in room"); return; }
+
+      // Update the player's socket ID to the new connection
+      room.players[playerIndex].socketId = socket.id;
+      await updateGameRoom(room);
+      await updatePlayerSocketId(data.roomId, playerIndex as 0 | 1, socket.id);
+
+      socket.join(data.roomId);
+
+      // Notify the other player that opponent reconnected
+      socket.to(data.roomId).emit("player-reconnected", {
+        playerIndex,
+        message: `${room.players[playerIndex].name} reconnected!`,
+      });
+
+      console.log(`🔄 Player "${room.players[playerIndex].name}" rejoined room ${data.roomId} as player ${playerIndex}`);
+      callback(true, playerIndex as 0 | 1);
+    } catch (error) {
+      console.error("Error rejoining room:", error);
+      callback(false, undefined, "Failed to rejoin");
+    }
+  });
+
+  // ─── Disconnection ───────────────────────────────────────────────────
+
   socket.on("disconnect", async () => {
     console.log(`User disconnected: ${socket.id}`);
 
-    // Find and clean up rooms where this player was in DynamoDB
     const activeRooms = await getActiveGameRooms();
     
     for (const room of activeRooms) {
       const playerIndex = room.players.findIndex((p: Player) => p.socketId === socket.id);
       
       if (playerIndex !== -1) {
-        // Notify other player
         io.to(room.roomId).emit("player-disconnected", {
           playerIndex,
-          message: "Opponent disconnected",
+          message: "Opponent disconnected — waiting for them to rejoin",
         });
-
-        // Remove room after a delay to allow reconnection
-        setTimeout(async () => {
-          await deleteGameRoom(room.roomId);
-          console.log(`🗑️  Room ${room.roomId} deleted from DynamoDB after player disconnect`);
-        }, 30000); // 30 seconds grace period
       }
     }
   });
