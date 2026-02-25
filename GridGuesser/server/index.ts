@@ -658,7 +658,8 @@ io.on("connection", (socket: Socket) => {
 
       callback(true, true);
     } else {
-      // Wrong guess, switch turn
+      // Wrong guess — still award 1 point for guessing, then switch turn
+      room.points[playerIndex] += 1;
       room.currentTurn = (1 - room.currentTurn) as 0 | 1;
       
       // Update room in DynamoDB
@@ -669,6 +670,7 @@ io.on("connection", (socket: Socket) => {
         playerIndex,
         guess,
         currentTurn: room.currentTurn,
+        points: room.points,
       });
 
       callback(true, false);

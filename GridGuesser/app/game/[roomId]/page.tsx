@@ -341,14 +341,20 @@ export default function GameRoomPage() {
     });
 
     // Listen for wrong guesses
-    socketInstance.on("wrong-guess", (data: { playerIndex: number; guess: string; currentTurn: 0 | 1 }) => {
+    socketInstance.on("wrong-guess", (data: { playerIndex: number; guess: string; currentTurn: 0 | 1; points?: [number, number] }) => {
       if (data.playerIndex === playerIndex) {
         showNotification(`Wrong guess: "${data.guess}". Try again!`);
       } else {
         showNotification(`Opponent guessed wrong: "${data.guess}"`);
       }
 
-      // Update game state
+      // Immediately update points and turn from the event
+      const currentRoom = useGameStore.getState().gameRoom;
+      if (currentRoom && data.points) {
+        setGameRoom({ ...currentRoom, points: data.points, currentTurn: data.currentTurn });
+      }
+
+      // Also fetch fresh state for full sync
       socketInstance.emit("get-game-state", roomId, (room: GameRoom | null) => {
         if (room) {
           setGameRoom(room);
