@@ -658,8 +658,11 @@ io.on("connection", (socket: Socket) => {
 
       callback(true, true);
     } else {
-      // Wrong guess — still award 1 point for guessing, then switch turn
-      room.points[playerIndex] += 1;
+      // Wrong guess — award 1 point for guessing (unless player used nuke)
+      const usedNuke = room.nukeUsed && room.nukeUsed[playerIndex];
+      if (!usedNuke) {
+        room.points[playerIndex] += 1;
+      }
       room.currentTurn = (1 - room.currentTurn) as 0 | 1;
       
       // Update room in DynamoDB
@@ -710,7 +713,7 @@ io.on("connection", (socket: Socket) => {
     const powerUpCosts: Record<string, number> = {
       skip: 5,
       reveal2x2: 8,
-      nuke: 15,
+      nuke: 30,
       fog: 8,
       revealLine: 6,
       freeze: 6,
@@ -783,6 +786,9 @@ io.on("connection", (socket: Socket) => {
       case "nuke": {
         const allTiles = Array.from({ length: 100 }, (_, i) => i);
         room.revealedTiles[opponentIndex] = allTiles;
+
+        if (!room.nukeUsed) room.nukeUsed = [false, false];
+        room.nukeUsed[playerIndex] = true;
 
         room.currentTurn = (1 - room.currentTurn) as 0 | 1;
 

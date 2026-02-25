@@ -76,8 +76,8 @@ const powerUps: PowerUp[] = [
   {
     id: 'nuke',
     name: 'Nuke',
-    cost: 15,
-    description: 'Reveal the entire opponent\'s image',
+    cost: 30,
+    description: 'Reveal the entire opponent\'s image (no more guess points)',
     icon: 'nuke',
     activation: 'instant',
   },

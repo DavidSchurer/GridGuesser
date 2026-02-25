@@ -27,6 +27,7 @@ export interface GameRoom {
   rematchRequests?: [boolean, boolean]; // tracks which players want a rematch
   rematchCategory?: string; // category chosen for next rematch
   rematchCustomQuery?: string; // custom query chosen for next rematch
+  nukeUsed?: [boolean, boolean]; // tracks which players have used nuke (no more guess points)
 }
 
 export interface DynamicImageMetadata {
