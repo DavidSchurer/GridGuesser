@@ -10,10 +10,13 @@
  * 6. Create a new search engine
  * 7. Enable "Image Search" and "Search the entire web"
  * 8. Get your Search Engine ID (cx)
- * 9. Add both to .env.local:
+ * 9. Add to .env.local:
  *    GOOGLE_API_KEY=your_api_key
  *    GOOGLE_SEARCH_ENGINE_ID=your_search_engine_id
+ *    GEMINI_API_KEY=your_gemini_key  (get free at https://aistudio.google.com/apikey)
  */
+
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
 interface GoogleImageResult {
   title: string;
@@ -297,313 +300,93 @@ export async function fetchTwoImagesForGame(
   return [image1, image2];
 }
 
-// ─── Custom Category System ─────────────────────────────────────────────
-// Strategy:
-//   1. Check CURATED_TERMS for a known category → instant, high quality
-//   2. Fallback: Google *web* search + strict NLP extraction
-//   3. Pick 2 distinct terms, image-search each; answer = the term itself
+// ─── Custom Category System (LLM-powered via Google Gemini) ─────────────
+// Uses Google Gemini (free tier) to generate relevant, specific subtopics
+// for any category. Results are cached in memory so repeated requests for
+// the same category don't re-call the LLM.
 // ────────────────────────────────────────────────────────────────────────
 
-/**
- * Curated term banks for popular custom categories.
- * Each term should be 1-2 words, well-known, and easy to depict as an image.
- * Keys are lowercase – we match against the user's query with fuzzy lookup.
- */
-const CURATED_TERMS: Record<string, string[]> = {
-  'computer science': [
-    'algorithm', 'binary tree', 'linked list', 'hashmap', 'recursion',
-    'sorting', 'stack', 'queue', 'database', 'encryption',
-    'firewall', 'compiler', 'server', 'API', 'blockchain',
-    'neural network', 'cloud computing', 'CPU', 'RAM', 'debugging',
-    'boolean', 'pixel', 'bandwidth', 'cache', 'router',
-    'kernel', 'terminal', 'binary', 'malware', 'proxy',
-  ],
-  'programming': [
-    'python', 'javascript', 'function', 'variable', 'loop',
-    'array', 'class', 'debugging', 'compiler', 'git',
-    'terminal', 'API', 'database', 'HTML', 'CSS',
-    'recursion', 'framework', 'stack overflow', 'binary', 'algorithm',
-  ],
-  'math': [
-    'pi', 'fraction', 'triangle', 'circle', 'graph',
-    'algebra', 'geometry', 'calculus', 'probability', 'matrix',
-    'equation', 'exponent', 'polygon', 'parabola', 'sine wave',
-    'abacus', 'protractor', 'compass', 'ruler', 'cube',
-  ],
-  'mathematics': [
-    'pi', 'fraction', 'triangle', 'circle', 'graph',
-    'algebra', 'geometry', 'calculus', 'probability', 'matrix',
-    'equation', 'exponent', 'polygon', 'parabola', 'sine wave',
-    'abacus', 'protractor', 'compass', 'ruler', 'cube',
-  ],
-  'physics': [
-    'gravity', 'magnet', 'pendulum', 'prism', 'laser',
-    'atom', 'electron', 'neutron', 'wave', 'friction',
-    'lever', 'pulley', 'tesla coil', 'black hole', 'supernova',
-    'lens', 'circuit', 'solenoid', 'turbine', 'satellite',
-  ],
-  'chemistry': [
-    'atom', 'molecule', 'beaker', 'flask', 'periodic table',
-    'crystal', 'acid', 'catalyst', 'enzyme', 'polymer',
-    'oxygen', 'hydrogen', 'carbon', 'nitrogen', 'helium',
-    'litmus', 'burner', 'pipette', 'titration', 'distillation',
-  ],
-  'biology': [
-    'cell', 'DNA', 'mitosis', 'bacteria', 'virus',
-    'photosynthesis', 'skeleton', 'brain', 'heart', 'lungs',
-    'microscope', 'chromosome', 'amoeba', 'fungus', 'pollen',
-    'ecosystem', 'fossil', 'embryo', 'antibody', 'neuron',
-  ],
-  'space': [
-    'mars', 'saturn', 'jupiter', 'nebula', 'asteroid',
-    'comet', 'black hole', 'galaxy', 'telescope', 'astronaut',
-    'moon', 'eclipse', 'supernova', 'rocket', 'satellite',
-    'space station', 'meteor', 'constellation', 'sun', 'mercury',
-  ],
-  'astronomy': [
-    'mars', 'saturn', 'jupiter', 'nebula', 'asteroid',
-    'comet', 'black hole', 'galaxy', 'telescope', 'astronaut',
-    'moon', 'eclipse', 'supernova', 'rocket', 'satellite',
-    'space station', 'meteor', 'constellation', 'sun', 'mercury',
-  ],
-  'history': [
-    'pyramid', 'colosseum', 'gladiator', 'viking', 'samurai',
-    'knight', 'castle', 'cannon', 'chariot', 'catapult',
-    'sphinx', 'pharaoh', 'toga', 'shield', 'crown',
-    'throne', 'scroll', 'armor', 'compass', 'telescope',
-  ],
-  'geography': [
-    'volcano', 'glacier', 'desert', 'island', 'canyon',
-    'waterfall', 'mountain', 'river', 'ocean', 'peninsula',
-    'rainforest', 'tundra', 'savanna', 'coral reef', 'delta',
-    'plateau', 'geyser', 'fjord', 'archipelago', 'oasis',
-  ],
-  'art': [
-    'mona lisa', 'sculpture', 'palette', 'easel', 'canvas',
-    'watercolor', 'mosaic', 'pottery', 'origami', 'graffiti',
-    'fresco', 'portrait', 'sketch', 'charcoal', 'abstract',
-    'oil painting', 'clay', 'mural', 'stencil', 'calligraphy',
-  ],
-  'movies': [
-    'popcorn', 'projector', 'clapperboard', 'red carpet', 'oscar',
-    'director', 'screenplay', 'stuntman', 'microphone', 'spotlight',
-    'camera', 'film reel', 'theater', 'premiere', 'trailer',
-    'green screen', 'costume', 'makeup', 'storyboard', 'soundtrack',
-  ],
-  'music': [
-    'guitar', 'piano', 'drums', 'violin', 'trumpet',
-    'saxophone', 'microphone', 'headphones', 'turntable', 'speaker',
-    'harp', 'flute', 'cello', 'accordion', 'banjo',
-    'metronome', 'tuning fork', 'amplifier', 'synthesizer', 'baton',
-  ],
-  'cooking': [
-    'sushi', 'pizza', 'pasta', 'wok', 'grill',
-    'whisk', 'spatula', 'blender', 'oven', 'rolling pin',
-    'cutting board', 'ladle', 'colander', 'skillet', 'mortar',
-    'tongs', 'apron', 'cupcake', 'sourdough', 'fondue',
-  ],
-  'medicine': [
-    'stethoscope', 'syringe', 'X-ray', 'bandage', 'thermometer',
-    'scalpel', 'ambulance', 'wheelchair', 'crutch', 'microscope',
-    'pill', 'vaccine', 'surgery', 'defibrillator', 'IV drip',
-    'blood pressure', 'cast', 'inhaler', 'prosthetic', 'stretcher',
-  ],
-  'sports': [
-    'basketball', 'football', 'tennis', 'baseball', 'golf',
-    'swimming', 'boxing', 'archery', 'hockey', 'surfing',
-    'skateboard', 'volleyball', 'badminton', 'fencing', 'javelin',
-    'trampoline', 'karate', 'wrestling', 'lacrosse', 'hurdles',
-  ],
-  'animals': [
-    'elephant', 'giraffe', 'penguin', 'dolphin', 'eagle',
-    'octopus', 'chameleon', 'flamingo', 'panda', 'koala',
-    'cheetah', 'gorilla', 'seahorse', 'jellyfish', 'peacock',
-    'armadillo', 'platypus', 'toucan', 'porcupine', 'sloth',
-  ],
-  'dinosaurs': [
-    'triceratops', 'stegosaurus', 'velociraptor', 'pterodactyl', 'brontosaurus',
-    'tyrannosaurus', 'fossil', 'ankylosaurus', 'diplodocus', 'spinosaurus',
-    'parasaurolophus', 'raptor', 'megalodon', 'mammoth', 'sabertooth',
-  ],
-  'video games': [
-    'mario', 'zelda', 'minecraft', 'tetris', 'pac-man',
-    'controller', 'joystick', 'pixel art', 'health bar', 'boss fight',
-    'power-up', 'checkpoint', 'leaderboard', 'VR headset', 'arcade',
-  ],
-  'fashion': [
-    'dress', 'sneakers', 'sunglasses', 'handbag', 'bowtie',
-    'scarf', 'boots', 'necklace', 'bracelet', 'watch',
-    'hat', 'jacket', 'earrings', 'belt', 'ring',
-    'tiara', 'vest', 'gloves', 'heels', 'tuxedo',
-  ],
-  'architecture': [
-    'skyscraper', 'dome', 'arch', 'column', 'bridge',
-    'lighthouse', 'pagoda', 'cathedral', 'pyramid', 'minaret',
-    'staircase', 'balcony', 'tower', 'fortress', 'aqueduct',
-    'windmill', 'igloo', 'treehouse', 'gazebo', 'amphitheater',
-  ],
-  'mythology': [
-    'dragon', 'phoenix', 'unicorn', 'minotaur', 'medusa',
-    'pegasus', 'kraken', 'cyclops', 'centaur', 'griffin',
-    'trident', 'hydra', 'cerberus', 'thunderbolt', 'labyrinth',
-    'sphinx', 'mermaid', 'werewolf', 'golem', 'chimera',
-  ],
-  'ocean': [
-    'whale', 'shark', 'coral', 'jellyfish', 'octopus',
-    'seahorse', 'starfish', 'stingray', 'lobster', 'dolphin',
-    'submarine', 'anchor', 'lighthouse', 'iceberg', 'trident',
-    'seashell', 'shipwreck', 'scuba', 'surfboard', 'pearl',
-  ],
-  'weather': [
-    'tornado', 'lightning', 'rainbow', 'blizzard', 'hurricane',
-    'cloud', 'hail', 'frost', 'fog', 'tsunami',
-    'avalanche', 'drought', 'thermometer', 'barometer', 'umbrella',
-    'snowflake', 'sunbeam', 'monsoon', 'dew', 'windmill',
-  ],
-};
+const termsCache = new Map<string, string[]>();
 
 /**
- * Try to match user's custom query to a curated term list.
- * Checks exact match, then checks if category contains or is contained by a key.
+ * Get the Gemini API key. Checks GEMINI_API_KEY first, then falls back
+ * to GOOGLE_API_KEY (works if Generative Language API is enabled).
+ * Read lazily so dotenv has time to load.
  */
-function findCuratedTerms(category: string): string[] | null {
-  const lower = category.toLowerCase().trim();
+function getGeminiKey(): string | undefined {
+  return process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+}
 
-  // Exact match
-  if (CURATED_TERMS[lower]) return CURATED_TERMS[lower];
+const TERM_GENERATION_PROMPT =
+  "You generate word lists for an image guessing game. " +
+  "Given a topic, return a JSON array of 25 specific subtopics that:\n" +
+  "- Are 1-3 words each\n" +
+  "- Are concrete, well-known items/things closely associated with the topic\n" +
+  "- Would produce recognizable results in a Google Image search\n" +
+  "- Are distinct from each other (no synonyms or near-duplicates)\n" +
+  "- Do NOT include generic words, verbs, or adjectives\n" +
+  "- Do NOT repeat the topic name itself\n" +
+  "Return ONLY a raw JSON array of strings, no markdown, no explanation.";
 
-  // Containment: "computer science topics" → matches "computer science"
-  for (const key of Object.keys(CURATED_TERMS)) {
-    if (lower.includes(key) || key.includes(lower)) {
-      return CURATED_TERMS[key];
-    }
+/**
+ * Use Google Gemini to generate specific, image-searchable subtopics for a category.
+ */
+async function generateTermsWithLLM(category: string): Promise<string[]> {
+  const cacheKey = category.toLowerCase().trim();
+
+  if (termsCache.has(cacheKey)) {
+    console.log(`💾 Using cached LLM terms for "${category}"`);
+    return termsCache.get(cacheKey)!;
   }
 
-  return null;
-}
+  const apiKey = getGeminiKey();
+  if (!apiKey) {
+    console.error(
+      "❌ No Gemini API key found.\n" +
+      "   Set GEMINI_API_KEY in .env.local (free at https://aistudio.google.com/apikey)"
+    );
+    return [];
+  }
 
-// ─── Web-Search Fallback (for categories not in curated list) ──────────
+  console.log(`🤖 Generating terms for "${category}" via Gemini...`);
 
-interface GoogleWebSearchResponse {
-  items?: { title: string; snippet: string; link: string }[];
-  error?: { code: number; message: string };
-}
+  try {
+    const genAI = new GoogleGenerativeAI(apiKey);
+    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
-/** Massive stopword set – anything that is NOT a real guessable topic */
-const STOPWORDS = new Set([
-  // Generic
-  'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
-  'of', 'with', 'by', 'from', 'is', 'are', 'was', 'were', 'be', 'been',
-  'has', 'have', 'had', 'do', 'does', 'did', 'will', 'would', 'could',
-  'should', 'may', 'might', 'can', 'shall', 'its', 'it', 'they', 'them',
-  'their', 'this', 'that', 'these', 'those', 'what', 'which', 'who',
-  'how', 'when', 'where', 'why', 'not', 'no', 'yes', 'all', 'each',
-  'every', 'both', 'few', 'more', 'most', 'other', 'some', 'such', 'than',
-  'too', 'very', 'just', 'also', 'about', 'up', 'out', 'so', 'if',
-  // Web / snippet noise
-  'types', 'type', 'examples', 'example', 'list', 'different', 'various',
-  'popular', 'famous', 'best', 'top', 'common', 'overview', 'guide',
-  'definition', 'meaning', 'introduction', 'basics', 'names', 'name',
-  'important', 'key', 'main', 'major', 'include', 'including',
-  'known', 'well', 'image', 'photo', 'picture', 'illustration', 'vector',
-  'icon', 'logo', 'wikipedia', 'article', 'page', 'site', 'web', 'click',
-  'read', 'learn', 'see', 'view', 'here', 'today', 'new', 'first',
-  'last', 'next', 'many', 'much', 'used', 'use', 'using', 'one', 'two',
-  'three', 'four', 'five', 'like', 'way', 'make', 'made', 'take',
-  'get', 'got', 'set', 'let', 'say', 'said', 'go', 'going', 'come',
-  'world', 'work', 'working', 'part', 'based', 'find', 'found',
-  'need', 'know', 'thing', 'things', 'look', 'looking', 'good', 'great',
-  'right', 'still', 'own', 'same', 'called', 'related', 'people',
-  'information', 'data', 'system', 'process', 'form', 'however', 'while',
-  'often', 'several', 'must', 'even', 'may', 'usually', 'typically',
-  'generally', 'specifically', 'essentially', 'particularly', 'among',
-  'between', 'within', 'without', 'through', 'during', 'before', 'after',
-  'above', 'below', 'under', 'over', 'into', 'onto', 'upon',
-  // Definitely junk from earlier results
-  'definitely', 'typed', 'cleared', 'repo', 'github', 'npm', 'yarn',
-  'download', 'install', 'update', 'version', 'release', 'source', 'code',
-  'file', 'folder', 'readme', 'license', 'docs', 'blog', 'post',
-]);
+    const result = await model.generateContent(
+      `${TERM_GENERATION_PROMPT}\n\nTopic: "${category}"`
+    );
+    const raw = result.response.text().trim();
 
-/**
- * Fallback: discover subtopics via Google web search + NLP.
- * Only returns clean 1-2 word terms that appear at least twice across results.
- */
-async function discoverSubtopicsFromWeb(category: string): Promise<string[]> {
-  if (!isGoogleApiConfigured()) return [];
+    console.log(`📝 Gemini raw response for "${category}":`, raw.slice(0, 300));
 
-  const nlp = require('compromise');
-
-  // Build category skip set
-  const catWords = new Set<string>();
-  category.toLowerCase().split(/\s+/).forEach(w => {
-    if (w.length > 1) catWords.add(w);
-    const s = nlp(w).tag('Noun').nouns().toSingular().text();
-    const p = nlp(w).tag('Noun').nouns().toPlural().text();
-    if (s) catWords.add(s.toLowerCase());
-    if (p) catWords.add(p.toLowerCase());
-  });
-
-  const queries = [
-    `types of ${category}`,
-    `${category} examples`,
-  ];
-
-  const allTerms = new Map<string, number>();
-
-  for (const query of queries) {
+    let terms: string[];
     try {
-      const url = new URL("https://www.googleapis.com/customsearch/v1");
-      url.searchParams.append("key", GOOGLE_API_KEY!);
-      url.searchParams.append("cx", GOOGLE_SEARCH_ENGINE_ID!);
-      url.searchParams.append("q", query);
-      url.searchParams.append("num", "10");
-
-      console.log(`🔍 Subtopic web search: "${query}"`);
-      const response = await fetch(url.toString());
-      const data: GoogleWebSearchResponse = await response.json();
-
-      if (data.error) {
-        console.error("Google API error:", data.error);
-        continue;
-      }
-
-      for (const item of data.items || []) {
-        const text = `${item.title} . ${item.snippet}`;
-        const doc = nlp(text);
-        const nounPhrases: string[] = doc.nouns().out('array');
-        const topics: string[] = doc.topics().out('array');
-
-        for (let raw of [...nounPhrases, ...topics]) {
-          // Strip everything except letters, spaces, hyphens
-          raw = raw.replace(/[^a-zA-Z\s-]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
-
-          if (raw.length < 3) continue;
-
-          const words = raw.split(' ');
-          if (words.length > 2) continue;                         // Max 2 words
-          if (words.some(w => STOPWORDS.has(w))) continue;        // No stopwords
-          if (words.every(w => catWords.has(w))) continue;        // Not the category itself
-          if (catWords.has(raw)) continue;
-          if (words.some(w => w.length < 2)) continue;            // No single-letter words
-
-          const weight = words.length === 1 ? 2 : 1;
-          allTerms.set(raw, (allTerms.get(raw) || 0) + weight);
-        }
-      }
-    } catch (err) {
-      console.error("Subtopic search error:", err);
+      const stripped = raw.replace(/^```json?\s*/i, '').replace(/```\s*$/, '').trim();
+      terms = JSON.parse(stripped);
+    } catch {
+      console.error(`❌ Failed to parse Gemini response as JSON for "${category}":`, raw);
+      return [];
     }
+
+    if (!Array.isArray(terms) || terms.length === 0) {
+      console.error(`❌ Gemini returned empty or non-array result for "${category}"`);
+      return [];
+    }
+
+    const cleaned = terms
+      .map((t: unknown) => (typeof t === 'string' ? t.trim().toLowerCase() : ''))
+      .filter((t: string) => t.length >= 2 && t.length <= 40);
+
+    console.log(`✅ Gemini generated ${cleaned.length} terms for "${category}":`, cleaned);
+
+    termsCache.set(cacheKey, cleaned);
+    return cleaned;
+  } catch (error: any) {
+    console.error(`❌ Gemini API call failed for "${category}":`, error?.message || error);
+    return [];
   }
-
-  // Only keep terms that appeared at least twice (across all results)
-  const sorted = Array.from(allTerms.entries())
-    .filter(([, count]) => count >= 2)
-    .sort((a, b) => b[1] - a[1])
-    .map(([term]) => term);
-
-  console.log(`📋 Web-discovered ${sorted.length} subtopics for "${category}":`, sorted.slice(0, 20));
-  return sorted;
 }
 
 // ─── Image Fetch ────────────────────────────────────────────────────────
@@ -667,9 +450,9 @@ async function fetchImageForTerm(
 /**
  * Fetch two images for a custom-category game.
  *
- * 1. Check curated term bank (instant, high-quality)
- * 2. Fallback: web-search + NLP extraction (slower, filtered strictly)
- * 3. Pick 2 distinct terms, image-search each
+ * 1. Ask the LLM to generate relevant subtopics for the category
+ * 2. Pick 2 distinct terms, image-search each
+ * 3. Fallback: use the category name directly if LLM fails
  */
 export async function fetchTwoImagesForCustomGame(
   customQuery: string
@@ -677,32 +460,23 @@ export async function fetchTwoImagesForCustomGame(
   const category = customQuery.trim();
   if (!category) return [null, null];
 
-  // ── Step 1: Try curated terms first ──
-  let termPool = findCuratedTerms(category);
-  if (termPool && termPool.length >= 2) {
-    console.log(`📚 Using curated terms for "${category}" (${termPool.length} available)`);
-  } else {
-    // ── Step 2: Fallback to web search discovery ──
-    console.log(`🌐 No curated terms for "${category}", discovering via web search...`);
-    const webTerms = await discoverSubtopicsFromWeb(category);
-    if (webTerms.length >= 2) {
-      termPool = webTerms;
-    } else {
-      console.warn(`⚠️  Could not find enough subtopics for "${category}", using category directly`);
-      const [img1, img2] = await Promise.all([
-        fetchImageForTerm(category, category),
-        fetchImageForTerm(category, category),
-      ]);
-      return [img1, img2];
-    }
+  // ── Step 1: Generate terms via LLM ──
+  const termPool = await generateTermsWithLLM(category);
+
+  if (termPool.length < 2) {
+    console.warn(`⚠️  LLM could not generate enough terms for "${category}", using category directly`);
+    const [img1, img2] = await Promise.all([
+      fetchImageForTerm(category, category),
+      fetchImageForTerm(category, category),
+    ]);
+    return [img1, img2];
   }
 
-  // ── Step 3: Pick 2 distinct random terms ──
+  // ── Step 2: Pick 2 distinct random terms ──
   const shuffled = [...termPool].sort(() => Math.random() - 0.5);
   const term1 = shuffled[0];
   let term2 = shuffled[1];
 
-  // Try to avoid terms that share words
   for (let i = 2; i < shuffled.length; i++) {
     const words1 = new Set(term1.split(' '));
     const words2 = new Set(term2.split(' '));
@@ -713,7 +487,7 @@ export async function fetchTwoImagesForCustomGame(
 
   console.log(`🎯 Selected terms for "${category}": "${term1}" and "${term2}"`);
 
-  // ── Step 4: Image search for each term ──
+  // ── Step 3: Image search for each term ──
   const [image1, image2] = await Promise.all([
     fetchImageForTerm(term1, category),
     fetchImageForTerm(term2, category),

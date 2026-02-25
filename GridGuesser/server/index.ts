@@ -71,6 +71,9 @@ if (!isDynamoDBConfigured()) {
 }
 
 console.log("AWS DynamoDB configured - using persistent storage");
+console.log(`Google API configured: ${isGoogleApiConfigured()}`);
+const geminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+console.log(`Gemini LLM configured: ${!!geminiKey} ${geminiKey ? '(key: ' + geminiKey.slice(0, 8) + '...)' : '⚠️  Set GEMINI_API_KEY for custom categories'}`);
 import authRoutes from "./authRoutes";
 app.use("/api/auth", authRoutes);
 
