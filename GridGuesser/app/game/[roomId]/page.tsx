@@ -173,8 +173,10 @@ export default function GameRoomPage() {
         });
       } else if (room.gameState === 'waiting' && room.players.length === 1) {
         // Room exists with one player – this is a joiner
-        if (playerName) {
-          joinRoomWithName(socketInstance, playerName);
+        // Use URL name, or logged-in username, otherwise prompt
+        const joinAs = playerName || (user?.username);
+        if (joinAs) {
+          joinRoomWithName(socketInstance, joinAs);
         } else {
           setShowJoinPrompt(true);
         }

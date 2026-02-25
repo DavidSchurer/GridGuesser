@@ -174,7 +174,7 @@ export default function AuthModal({ isOpen, onClose, defaultMode = "login" }: Au
 
         <div className="mt-6 text-center">
           <p className="text-sm text-gray-400">
-            {mode === "login" ? "Don&apos;t have an account? " : "Already have an account? "}
+            {mode === "login" ? "Don\u2019t have an account? " : "Already have an account? "}
             <button
               onClick={switchMode}
               className="text-blue-400 hover:text-blue-300 font-medium transition-colors"
