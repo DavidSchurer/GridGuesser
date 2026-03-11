@@ -16,6 +16,7 @@ interface GameGridProps {
   peekTiles?: number[]; // tiles temporarily visible via Peek power-up
   revealLineMode?: boolean;
   lineDirection?: 'row' | 'col';
+  compact?: boolean; // smaller grid for royale multi-grid layout
 }
 
 export default function GameGrid({
@@ -30,6 +31,7 @@ export default function GameGrid({
   peekTiles = [],
   revealLineMode = false,
   lineDirection = 'col',
+  compact = false,
 }: GameGridProps) {
   const [loadingTile, setLoadingTile] = useState<number | null>(null);
   const [hoveredTile, setHoveredTile] = useState<number | null>(null);
@@ -154,9 +156,9 @@ export default function GameGrid({
   };
 
   return (
-    <div className="w-full max-w-[600px]">
+    <div className={compact ? "w-full max-w-[min(360px,30vw)] mx-auto" : "w-full max-w-[600px]"}>
       <div 
-        className="grid-container" 
+        className={`grid-container ${compact ? "compact" : ""}`}
         onMouseLeave={handleGridMouseLeave}
       >
         {Array.from({ length: 100 }).map((_, index) => {
@@ -227,9 +229,9 @@ export default function GameGrid({
                     animate={{ rotateY: 0, opacity: 1 }}
                     exit={{ rotateY: 90, opacity: 0 }}
                     transition={{ duration: 0.3 }}
-                    className="w-full h-full flex items-center justify-center text-gray-400 dark:text-gray-600 text-xs font-mono"
+                    className={`w-full h-full flex items-center justify-center text-gray-400 dark:text-gray-600 font-mono ${compact ? "" : "text-xs"}`}
                   >
-                    {index + 1}
+                    {compact ? "" : index + 1}
                     {isIn2x2 && reveal2x2Mode && (
                       <motion.div
                         initial={{ opacity: 0 }}

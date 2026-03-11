@@ -9,9 +9,10 @@ interface PhaseTimerProps {
   phaseEndTime: number;
   round: number;
   hasActed: boolean; // whether the current player has acted this phase
+  compact?: boolean;
 }
 
-export default function PhaseTimer({ phase, phaseEndTime, round, hasActed }: PhaseTimerProps) {
+export default function PhaseTimer({ phase, phaseEndTime, round, hasActed, compact }: PhaseTimerProps) {
   const [secondsLeft, setSecondsLeft] = useState(0);
 
   useEffect(() => {
@@ -53,15 +54,15 @@ export default function PhaseTimer({ phase, phaseEndTime, round, hasActed }: Pha
     : 0;
 
   return (
-    <div className={`w-full rounded-xl bg-gradient-to-r ${bgColor} p-4 shadow-lg`}>
-      <div className="flex items-center justify-between text-white mb-2">
+    <div className={`w-full rounded-xl bg-gradient-to-r ${bgColor} shadow-lg ${compact ? 'p-3' : 'p-4'}`}>
+      <div className={`flex items-center justify-between text-white ${compact ? 'mb-1' : 'mb-2'}`}>
         <div>
-          <div className="text-xs font-medium uppercase tracking-wider opacity-80">
+          <div className={`font-medium uppercase tracking-wider opacity-80 ${compact ? 'text-[10px]' : 'text-xs'}`}>
             Round {round}
           </div>
-          <div className="text-xl font-bold">{label}</div>
+          <div className={`font-bold ${compact ? 'text-base' : 'text-xl'}`}>{label}</div>
           {sublabel && (
-            <div className="text-sm opacity-80">{sublabel}</div>
+            <div className={`opacity-80 ${compact ? 'text-xs' : 'text-sm'}`}>{sublabel}</div>
           )}
         </div>
         <div className="text-right">
@@ -69,13 +70,13 @@ export default function PhaseTimer({ phase, phaseEndTime, round, hasActed }: Pha
             key={secondsLeft}
             initial={{ scale: 1.3, opacity: 0.5 }}
             animate={{ scale: 1, opacity: 1 }}
-            className={`text-4xl font-bold tabular-nums ${secondsLeft <= 5 ? "text-red-200" : ""}`}
+            className={`font-bold tabular-nums ${compact ? 'text-2xl' : 'text-4xl'} ${secondsLeft <= 5 ? "text-red-200" : ""}`}
           >
             {secondsLeft}s
           </motion.div>
         </div>
       </div>
-      <div className="h-2 bg-white/20 rounded-full overflow-hidden">
+      <div className={`bg-white/20 rounded-full overflow-hidden ${compact ? 'h-1.5' : 'h-2'}`}>
         <motion.div
           className="h-full bg-white/60 rounded-full"
           initial={false}

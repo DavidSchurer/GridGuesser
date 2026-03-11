@@ -48,3 +48,7 @@ body {
   @apply grid grid-cols-10 gap-1 bg-gray-100 p-2 rounded-lg;
 }
 
+.grid-container.compact {
+  @apply gap-0.5 p-1;
+}
+

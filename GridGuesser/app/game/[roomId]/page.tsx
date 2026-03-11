@@ -58,6 +58,7 @@ export default function GameRoomPage() {
 
   // New power-up states
   const [peekTiles, setPeekTiles] = useState<number[]>([]); // tiles temporarily visible via Peek
+  const [peekTargetPlayerIndex, setPeekTargetPlayerIndex] = useState<number | null>(null); // which grid has peek (royale)
   const [isFrozen, setIsFrozen] = useState(false); // whether this player is frozen
   const [lineDirection, setLineDirection] = useState<'row' | 'col'>('col'); // revealLine direction
 
@@ -415,9 +416,11 @@ export default function GameRoomPage() {
       // Handle Peek: temporarily show tiles for the player who used it
       if (data.powerUpId === 'peek' && data.peekTiles && data.peekPlayerIndex === currentPlayerIndex) {
         setPeekTiles(data.peekTiles);
+        setPeekTargetPlayerIndex(data.targetPlayer ?? null);
         // Auto-hide after 5 seconds
         setTimeout(() => {
           setPeekTiles([]);
+          setPeekTargetPlayerIndex(null);
           showNotification('Peek expired!');
         }, 5000);
       }
@@ -734,6 +737,8 @@ export default function GameRoomPage() {
     socket.emit("use-power-up", { roomId, powerUpId, tileIndex, lineType, lineIndex, targetPlayerIndex }, (success: boolean, errorMsg?: string) => {
       if (!success) {
         showNotification(errorMsg || "Failed to use power-up");
+      } else if (gameRoom?.gameMode === 'royale' && royalePhase === 'reveal' && (powerUpId === 'reveal2x2' || powerUpId === 'peek' || powerUpId === 'revealLine')) {
+        setHasActedThisPhase(true);
       }
     });
   };
@@ -777,6 +782,25 @@ export default function GameRoomPage() {
     if (!socket || playerIndex === null || !gameRoom) return;
     if (hasActedThisPhase) return;
     if (royalePhase !== 'reveal') return;
+
+    // If a tile-based power-up is selected, use it on this grid
+    if (selectedPowerUp === 'reveal2x2') {
+      handleUsePowerUp('reveal2x2', tileIndex, undefined, undefined, targetPlayerIndex);
+      setSelectedPowerUp(null);
+      return;
+    }
+    if (selectedPowerUp === 'peek') {
+      handleUsePowerUp('peek', tileIndex, undefined, undefined, targetPlayerIndex);
+      setSelectedPowerUp(null);
+      return;
+    }
+    if (selectedPowerUp === 'revealLine') {
+      const lineIndex = lineDirection === 'row' ? Math.floor(tileIndex / 10) : tileIndex % 10;
+      handleUsePowerUp('revealLine', undefined, lineDirection, lineIndex, targetPlayerIndex);
+      setSelectedPowerUp(null);
+      setLineDirection('col');
+      return;
+    }
 
     socket.emit("royale-reveal-tile", { roomId, tileIndex, targetPlayerIndex }, (success: boolean, errorMsg?: string) => {
       if (success) {
@@ -969,10 +993,10 @@ export default function GameRoomPage() {
   const isPlayerActive = isRoyale ? royaleActivePlayers.includes(playerIndex) : true;
 
   return (
-    <main className="min-h-screen p-4 md:p-8">
+    <main className={`min-h-screen ${isRoyale ? 'p-3 md:p-4' : 'p-4 md:p-8'}`}>
       <div className="max-w-[1800px] mx-auto">
         {/* Header */}
-        <div className="mb-6 flex justify-between items-center">
+        <div className={`flex justify-between items-center ${isRoyale ? 'mb-4' : 'mb-6'}`}>
           <button
             onClick={() => { clearActiveGame(); router.push("/"); }}
             className="px-4 py-2 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 rounded-lg transition-colors"
@@ -980,7 +1004,7 @@ export default function GameRoomPage() {
             ← Leave Game
           </button>
           <div className="text-center">
-            <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-2">
+            <h1 className={`font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-2 ${isRoyale ? 'text-xl md:text-2xl' : 'text-3xl'}`}>
               GridGuesser
             </h1>
             <RoomCodeDisplay roomCode={roomId} />
@@ -1012,122 +1036,153 @@ export default function GameRoomPage() {
 
         {isRoyale ? (
           /* ═══ ROYALE MODE UI ═══ */
-          <>
-            {/* Phase Timer */}
-            {gameRoom.gameState === 'playing' && (
-              <div className="mb-6">
+          <div className="grid grid-cols-1 xl:grid-cols-[1fr_320px] gap-6">
+            {/* Left: Royale content */}
+            <div className="space-y-4">
+              {/* Phase Timer */}
+              {gameRoom.gameState === 'playing' && (
                 <PhaseTimer
                   phase={royalePhase}
                   phaseEndTime={phaseEndTime}
                   round={phaseRound}
                   hasActed={hasActedThisPhase}
+                  compact
                 />
+              )}
+
+              {/* Player Info Cards - compact */}
+              <div className={`flex flex-wrap gap-2 justify-center ${gameRoom.maxPlayers === 3 ? '' : ''}`}>
+                {gameRoom.players.map((p) => (
+                  <PlayerInfo
+                    key={p.playerIndex}
+                    playerName={p.name}
+                    points={gameRoom.points[p.playerIndex] || 0}
+                    isActive={royaleActivePlayers.includes(p.playerIndex) && gameRoom.gameState === 'playing'}
+                    isYou={p.playerIndex === playerIndex}
+                    compact
+                  />
+                ))}
               </div>
-            )}
 
-            {/* Player Info Cards - all players */}
-            <div className={`grid grid-cols-2 md:grid-cols-${gameRoom.maxPlayers} gap-3 mb-6`}>
-              {gameRoom.players.map((p) => (
-                <PlayerInfo
-                  key={p.playerIndex}
-                  playerName={p.name}
-                  points={gameRoom.points[p.playerIndex] || 0}
-                  isActive={royaleActivePlayers.includes(p.playerIndex) && gameRoom.gameState === 'playing'}
-                  isYou={p.playerIndex === playerIndex}
-                />
-              ))}
-            </div>
+              {/* Placement badges */}
+              {royalePlacements.length > 0 && gameRoom.gameState === 'playing' && (
+                <div className="flex gap-2 flex-wrap">
+                  {royalePlacements.map((p) => {
+                    const ordinal = p.place === 1 ? "1st" : p.place === 2 ? "2nd" : p.place === 3 ? "3rd" : "4th";
+                    return (
+                      <span key={p.playerIndex} className="px-2 py-0.5 bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-200 rounded-full text-xs font-medium">
+                        {p.name}: {ordinal}
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
 
-            {/* Placement badges */}
-            {royalePlacements.length > 0 && gameRoom.gameState === 'playing' && (
-              <div className="flex gap-2 mb-4 flex-wrap">
-                {royalePlacements.map((p) => {
-                  const ordinal = p.place === 1 ? "1st" : p.place === 2 ? "2nd" : p.place === 3 ? "3rd" : "4th";
+              {/* Notification */}
+              {!isPlayerActive && gameRoom.gameState === 'playing' && (
+                <div className="p-2 bg-green-100 dark:bg-green-900/30 border border-green-300 dark:border-green-700 rounded-lg text-center">
+                  <p className="text-green-700 dark:text-green-300 text-sm font-medium">
+                    You&apos;ve been placed! Watching the remaining players...
+                  </p>
+                </div>
+              )}
+
+              {/* Grid Layout: 3 players = row, 4 players = 2x2 */}
+              <div className={`grid gap-4 ${gameRoom.maxPlayers === 3 ? 'grid-cols-1 sm:grid-cols-3' : 'grid-cols-1 sm:grid-cols-2'}`}>
+                {gameRoom.players.map((p) => {
+                  const isMe = p.playerIndex === playerIndex;
+                  const canClick = !isMe && isPlayerActive && royalePhase === 'reveal' && !hasActedThisPhase && gameRoom.gameState === 'playing';
+                  const placement = royalePlacements.find(pl => pl.playerIndex === p.playerIndex);
+
                   return (
-                    <span key={p.playerIndex} className="px-3 py-1 bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-200 rounded-full text-sm font-medium">
-                      {p.name}: {ordinal}
-                    </span>
+                    <div key={p.playerIndex} className={`flex flex-col items-center ${isMe ? 'opacity-90' : ''}`}>
+                      <h3 className="text-sm font-semibold mb-1 text-gray-800 dark:text-gray-100 flex items-center gap-2">
+                        <span className={isMe ? "text-blue-600 dark:text-blue-400" : "text-purple-600 dark:text-purple-400"}>
+                          {isMe ? "Your" : `${p.name}'s`}
+                        </span> Grid
+                        {isMe && <span className="text-[10px] bg-blue-100 dark:bg-blue-900/30 px-1.5 py-0.5 rounded-full text-blue-600 dark:text-blue-400">You</span>}
+                        {placement && (
+                          <span className="text-[10px] bg-amber-100 dark:bg-amber-900/30 px-1.5 py-0.5 rounded-full text-amber-700 dark:text-amber-300">
+                            {placement.place === 1 ? "1st" : placement.place === 2 ? "2nd" : placement.place === 3 ? "3rd" : "4th"}
+                          </span>
+                        )}
+                      </h3>
+                      <GameGrid
+                        key={`royale-${p.playerIndex}-${gameRoom.imageHashes[p.playerIndex]}-${gameResetKey}`}
+                        imageHash={gameRoom.imageHashes[p.playerIndex] || ''}
+                        revealedTiles={gameRoom.revealedTiles[p.playerIndex] || []}
+                        isMyTurn={canClick}
+                        isOpponentGrid={!isMe}
+                        onTileClick={canClick ? (tileIndex) => handleRoyaleTileClick(tileIndex, p.playerIndex) : undefined}
+                        disabled={!canClick}
+                        compact
+                        reveal2x2Mode={selectedPowerUp === 'reveal2x2'}
+                        peekMode={selectedPowerUp === 'peek'}
+                        peekTiles={peekTargetPlayerIndex === p.playerIndex ? peekTiles : []}
+                        revealLineMode={selectedPowerUp === 'revealLine'}
+                        lineDirection={lineDirection}
+                      />
+                    </div>
                   );
                 })}
               </div>
-            )}
 
-            {/* Notification */}
-            {!isPlayerActive && gameRoom.gameState === 'playing' && (
-              <div className="mb-4 p-3 bg-green-100 dark:bg-green-900/30 border border-green-300 dark:border-green-700 rounded-lg text-center">
-                <p className="text-green-700 dark:text-green-300 font-medium">
-                  You&apos;ve been placed! Watching the remaining players...
-                </p>
-              </div>
-            )}
-
-            {/* 2x2 Grid Layout */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-              {gameRoom.players.map((p) => {
-                const isMe = p.playerIndex === playerIndex;
-                const isPlaced = royalePlacedPlayers.includes(p.playerIndex);
-                const canClick = !isMe && isPlayerActive && royalePhase === 'reveal' && !hasActedThisPhase && gameRoom.gameState === 'playing';
-                const placement = royalePlacements.find(pl => pl.playerIndex === p.playerIndex);
-
-                return (
-                  <div key={p.playerIndex} className={`flex flex-col items-center ${isMe ? 'opacity-70' : ''}`}>
-                    <h3 className="text-lg font-semibold mb-2 text-gray-800 dark:text-gray-100 flex items-center gap-2">
-                      <span className={isMe ? "text-blue-600 dark:text-blue-400" : "text-purple-600 dark:text-purple-400"}>
-                        {isMe ? "Your" : `${p.name}'s`}
-                      </span> Grid
-                      {isMe && <span className="text-xs bg-blue-100 dark:bg-blue-900/30 px-2 py-0.5 rounded-full text-blue-600 dark:text-blue-400">You</span>}
-                      {placement && (
-                        <span className="text-xs bg-amber-100 dark:bg-amber-900/30 px-2 py-0.5 rounded-full text-amber-700 dark:text-amber-300">
-                          {placement.place === 1 ? "1st" : placement.place === 2 ? "2nd" : placement.place === 3 ? "3rd" : "4th"}
-                        </span>
-                      )}
-                    </h3>
-                    <GameGrid
-                      key={`royale-${p.playerIndex}-${gameRoom.imageHashes[p.playerIndex]}-${gameResetKey}`}
-                      imageHash={gameRoom.imageHashes[p.playerIndex] || ''}
-                      revealedTiles={gameRoom.revealedTiles[p.playerIndex] || []}
-                      isMyTurn={canClick}
-                      isOpponentGrid={!isMe}
-                      onTileClick={canClick ? (tileIndex) => handleRoyaleTileClick(tileIndex, p.playerIndex) : undefined}
-                      disabled={!canClick}
+              {/* Guess Phase UI */}
+              {royalePhase === 'guess' && isPlayerActive && gameRoom.gameState === 'playing' && (
+                <div className="max-w-2xl mx-auto space-y-4">
+                  <div className="text-center">
+                    <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">
+                      Select whose image to guess, then type your answer:
+                    </p>
+                    <GridSelector
+                      players={gameRoom.players}
+                      myPlayerIndex={playerIndex}
+                      activePlayers={royaleActivePlayers}
+                      placedPlayers={royalePlacedPlayers}
+                      selectedTarget={royaleGuessTarget}
+                      onSelectTarget={setRoyaleGuessTarget}
                     />
                   </div>
-                );
-              })}
+                  <GuessInput
+                    onSubmitGuess={handleSubmitGuess}
+                    disabled={hasActedThisPhase || royaleGuessTarget === null}
+                    gameState={gameRoom.gameState}
+                  />
+                  {!hasActedThisPhase && (
+                    <button
+                      onClick={handleRoyaleSkipGuess}
+                      className="w-full py-2 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
+                    >
+                      Skip guessing this round
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
 
-            {/* Guess Phase UI */}
-            {royalePhase === 'guess' && isPlayerActive && gameRoom.gameState === 'playing' && (
-              <div className="max-w-2xl mx-auto space-y-4">
-                <div className="text-center">
-                  <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">
-                    Select whose image to guess, then type your answer:
-                  </p>
-                  <GridSelector
-                    players={gameRoom.players}
-                    myPlayerIndex={playerIndex}
-                    activePlayers={royaleActivePlayers}
-                    placedPlayers={royalePlacedPlayers}
-                    selectedTarget={royaleGuessTarget}
-                    onSelectTarget={setRoyaleGuessTarget}
-                  />
-                </div>
-                <GuessInput
-                  onSubmitGuess={handleSubmitGuess}
-                  disabled={hasActedThisPhase || royaleGuessTarget === null}
-                  gameState={gameRoom.gameState}
-                />
-                {!hasActedThisPhase && (
-                  <button
-                    onClick={handleRoyaleSkipGuess}
-                    className="w-full py-2 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
-                  >
-                    Skip guessing this round
-                  </button>
+            {/* Right: PowerUps Sidebar */}
+            <div className="xl:sticky xl:top-8 xl:self-start">
+              <PowerUpsSidebar
+                myPoints={myPoints}
+                opponentPoints={Math.max(
+                  0,
+                  ...gameRoom.players
+                    .filter((p) => p.playerIndex !== playerIndex)
+                    .map((p) => gameRoom.points[p.playerIndex] || 0)
                 )}
-              </div>
-            )}
-          </>
+                isMyTurn={isPlayerActive && (royalePhase === 'reveal' || royalePhase === 'guess')}
+                onUsePowerUp={(powerUpId, tileIndex, lineType, lineIndex, targetPlayerIndex) => {
+                  handleUsePowerUp(powerUpId, tileIndex, lineType, lineIndex, targetPlayerIndex);
+                }}
+                disabled={gameRoom.gameState !== 'playing'}
+                isFrozen={isFrozen}
+                gameMode="royale"
+                players={gameRoom.players}
+                myPlayerIndex={playerIndex}
+                activePlayers={royaleActivePlayers}
+              />
+            </div>
+          </div>
         ) : (
           /* ═══ NORMAL MODE UI ═══ */
           <>
