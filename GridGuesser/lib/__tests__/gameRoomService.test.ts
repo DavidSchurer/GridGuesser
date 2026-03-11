@@ -160,15 +160,13 @@ function makeFakeRoom(overrides: Partial<GameRoom> = {}): GameRoom {
 
 // Typed references to the mock functions — saves typing vi.mocked() everywhere.
 //
-// WHY THE `as any` ON mockSend:
-// Our mock docClient.send needs to return different shapes depending on the
-// DynamoDB operation: { Item: GameRoom } for GetCommand, { Items: GameRoom[] }
-// for ScanCommand, or just {} for PutCommand. TypeScript infers the mock's
-// return type as `void` (from vi.fn()), which is too narrow. Casting to `any`
-// tells TypeScript "trust us, we know what we're doing with this mock."
-// This is a common pattern in test files where mock flexibility > type safety.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const mockSend = vi.mocked(docClient.send) as any;
+// mockSend needs to return different shapes per DynamoDB op: { Item }, { Items }, or {}.
+// vi.mocked() gives us Mock types; we use a loose cast so we can call mockResolvedValueOnce etc.
+const mockSend = vi.mocked(docClient.send) as ReturnType<typeof vi.fn> & {
+  mockResolvedValue: (value: unknown) => void;
+  mockResolvedValueOnce: (value: unknown) => void;
+  mockRejectedValueOnce: (reason: unknown) => void;
+};
 const mockGetCache = vi.mocked(getCachedGameRoom);
 const mockSetCache = vi.mocked(cacheGameRoom);
 const mockDeleteCache = vi.mocked(deleteCachedGameRoom);

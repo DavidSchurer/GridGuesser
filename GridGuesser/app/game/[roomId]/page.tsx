@@ -666,7 +666,8 @@ export default function GameRoomPage() {
       disconnectSocket();
       reset();
     };
-  }, [roomId]); // Only re-run if roomId changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally only re-run when roomId changes
+  }, [roomId]);
 
   // Keyboard listener for revealLine mode: R for row, C for column
   useEffect(() => {

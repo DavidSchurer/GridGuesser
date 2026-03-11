@@ -189,6 +189,8 @@ io.on("connection", (socket: Socket) => {
         createdAt: Date.now(),
         category,
         imageMetadata: [null, null],
+        gameMode: "normal",
+        maxPlayers: 2,
       };
       
       gameRooms.set(roomId, room);
