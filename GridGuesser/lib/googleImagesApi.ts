@@ -300,6 +300,49 @@ export async function fetchTwoImagesForGame(
   return [image1, image2];
 }
 
+/**
+ * Fetch N different random images from the same category (for Grid Royale)
+ */
+export async function fetchImagesForRoyaleGame(
+  category: CategoryKey,
+  count: 3 | 4
+): Promise<(FetchedImage | null)[]> {
+  const promises = Array.from({ length: count }, () =>
+    fetchRandomImageByCategory(category)
+  );
+  return Promise.all(promises);
+}
+
+/**
+ * Fetch N images for a custom-category royale game
+ */
+export async function fetchCustomImagesForRoyaleGame(
+  customQuery: string,
+  count: 3 | 4
+): Promise<(FetchedImage | null)[]> {
+  const category = customQuery.trim();
+  if (!category) return Array(count).fill(null);
+
+  const termPool = await generateTermsWithLLM(category);
+
+  if (termPool.length < count) {
+    console.warn(`⚠️  LLM could not generate enough terms for "${category}", using category directly`);
+    const promises = Array.from({ length: count }, () =>
+      fetchImageForTerm(category, category)
+    );
+    return Promise.all(promises);
+  }
+
+  const shuffled = [...termPool].sort(() => Math.random() - 0.5);
+  const selectedTerms = shuffled.slice(0, count);
+
+  console.log(`🎯 Selected ${count} terms for royale "${category}": ${selectedTerms.join(', ')}`);
+
+  return Promise.all(
+    selectedTerms.map(term => fetchImageForTerm(term, category))
+  );
+}
+
 // ─── Custom Category System (LLM-powered via Google Gemini) ─────────────
 // Uses Google Gemini (free tier) to generate relevant, specific subtopics
 // for any category. Results are cached in memory so repeated requests for

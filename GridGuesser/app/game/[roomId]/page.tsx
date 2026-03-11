@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { connectSocket, disconnectSocket } from "@/lib/socket";
 import { useGameStore } from "@/lib/gameStore";
 import { useAuth } from "@/lib/authContext";
-import { GameRoom } from "@/lib/types";
+import { GameRoom, GameMode, RoyalePhase, RoyalePlacement } from "@/lib/types";
 import GameGrid from "@/components/GameGrid";
 import GameStatus from "@/components/GameStatus";
 import GuessInput from "@/components/GuessInput";
@@ -13,6 +13,9 @@ import RoomCodeDisplay from "@/components/RoomCodeDisplay";
 import PowerUpsSidebar from "@/components/PowerUpsSidebar";
 import PlayerInfo from "@/components/PlayerInfo";
 import CategorySelector from "@/components/CategorySelector";
+import PhaseTimer from "@/components/PhaseTimer";
+import RoyaleLeaderboard from "@/components/RoyaleLeaderboard";
+import GridSelector from "@/components/GridSelector";
 import Icon from "@/components/Icon";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -29,6 +32,7 @@ export default function GameRoomPage() {
     setGameRoom,
     setRoomId,
     reset,
+    royalePlacements,
   } = useGameStore();
 
   const [socket, setSocket] = useState<ReturnType<typeof connectSocket> | null>(null);
@@ -60,6 +64,16 @@ export default function GameRoomPage() {
   // Invite link join flow: prompt for name when arriving without one
   const [showJoinPrompt, setShowJoinPrompt] = useState(false);
   const [joinName, setJoinName] = useState("");
+
+  // Royale-specific state
+  const [royalePhase, setRoyalePhase] = useState<RoyalePhase>('idle');
+  const [phaseEndTime, setPhaseEndTime] = useState(0);
+  const [phaseRound, setPhaseRound] = useState(0);
+  const [hasActedThisPhase, setHasActedThisPhase] = useState(false);
+  const [royaleGuessTarget, setRoyaleGuessTarget] = useState<number | null>(null);
+  const [showRoyaleLeaderboard, setShowRoyaleLeaderboard] = useState(false);
+  const [royaleImageNames, setRoyaleImageNames] = useState<string[]>([]);
+  const [waitingPlayerCount, setWaitingPlayerCount] = useState(1);
 
   const showNotification = (message: string) => {
     setNotification(message);
@@ -95,7 +109,7 @@ export default function GameRoomPage() {
   };
 
   // Save active game to localStorage so the home page can offer rejoin
-  const saveActiveGame = (pIndex: 0 | 1, playerId: string) => {
+  const saveActiveGame = (pIndex: number, playerId: string) => {
     try {
       localStorage.setItem('gridguesser_active_game', JSON.stringify({ roomId, playerIndex: pIndex, playerId }));
     } catch {}
@@ -110,19 +124,17 @@ export default function GameRoomPage() {
     setSocket(socketInstance);
     setRoomId(roomId);
 
-    // Get player name and category from URL query params or use defaults
     const searchParams = new URLSearchParams(window.location.search);
     const playerName = searchParams.get('name');
     const selectedCategory = searchParams.get('category') || 'landmarks';
     const customQuery = searchParams.get('customQuery') || '';
     const isRejoin = searchParams.get('rejoin') === '1';
+    const gameModeParam = (searchParams.get('gameMode') || 'normal') as GameMode;
+    const maxPlayersParam = parseInt(searchParams.get('maxPlayers') || '2', 10);
 
-    // Check if this is a rejoin attempt
     const savedGame = (() => { try { return JSON.parse(localStorage.getItem('gridguesser_active_game') || 'null'); } catch { return null; } })();
     const canTryRejoin = isRejoin && savedGame?.roomId === roomId && savedGame?.playerId;
 
-    // Try to create the room with the specific roomId
-    // First check if room exists
     socketInstance.emit("get-game-state", roomId, (room: GameRoom | null) => {
       if (!room) {
         if (canTryRejoin) {
@@ -130,12 +142,13 @@ export default function GameRoomPage() {
           setError("Game no longer exists");
           return;
         }
-        // Room doesn't exist, create it with this roomId
         const roomData = { 
           roomId, 
           playerName: playerName || 'Player', 
           category: selectedCategory,
-          ...(customQuery && { customQuery })
+          ...(customQuery && { customQuery }),
+          gameMode: gameModeParam,
+          maxPlayers: gameModeParam === 'royale' ? maxPlayersParam : 2,
         };
         
         socketInstance.emit("create-room-with-id", roomData, (success: boolean, errorMsg?: string) => {
@@ -153,9 +166,8 @@ export default function GameRoomPage() {
             setError(errorMsg || "Failed to create room");
           }
         });
-      } else if (canTryRejoin && room.players.length === 2) {
-        // Rejoin: player was in this game and is coming back
-        socketInstance.emit("rejoin-room", { roomId, playerId: savedGame.playerId }, (success: boolean, pIndex?: 0 | 1, errMsg?: string) => {
+      } else if (canTryRejoin && room.players.length >= 2) {
+        socketInstance.emit("rejoin-room", { roomId, playerId: savedGame.playerId }, (success: boolean, pIndex?: number, errMsg?: string) => {
           if (success && pIndex !== undefined) {
             setPlayerIndex(pIndex);
             setOpponentConnected(true);
@@ -171,45 +183,154 @@ export default function GameRoomPage() {
             setError(errMsg || "Failed to rejoin game");
           }
         });
-      } else if (room.gameState === 'waiting' && room.players.length === 1) {
-        // Room exists with one player – this is a joiner
-        // Use URL name, or logged-in username, otherwise prompt
+      } else if (room.gameState === 'waiting' && room.players.length < (room.maxPlayers ?? 2)) {
+        // Room exists with space for more players – this is a joiner
         const joinAs = playerName || (user?.username);
         if (joinAs) {
           joinRoomWithName(socketInstance, joinAs);
         } else {
           setShowJoinPrompt(true);
         }
-      } else if (room.gameState === 'playing' && room.players.length === 2) {
-        setError("Game is already in progress with 2 players");
+      } else if (room.gameState === 'playing') {
+        setError(`Game is already in progress with ${room.players.length} players`);
       } else {
         setError("Unable to join this room");
       }
     });
 
+    // Listen for player joined (for royale lobby)
+    socketInstance.on("player-joined", (data: { playerIndex: number; playerName: string; playerCount: number; maxPlayers: number }) => {
+      setWaitingPlayerCount(data.playerCount);
+      showNotification(`${data.playerName} joined! (${data.playerCount}/${data.maxPlayers})`);
+      // Refresh room state to get updated player list
+      socketInstance.emit("get-game-state", roomId, (room: GameRoom | null) => {
+        if (room) setGameRoom(room);
+      });
+    });
+
     // Listen for game start
-    socketInstance.on("game-start", (data: { roomId: string; players: any[]; currentTurn: 0 | 1; images: [string, string] }) => {
+    socketInstance.on("game-start", (data: { roomId: string; players: any[]; currentTurn: number; gameMode?: GameMode; maxPlayers?: number }) => {
       setOpponentConnected(true);
-      showNotification("Opponent joined! Game starting...");
+      showNotification(data.gameMode === 'royale' ? "All players joined! Game starting..." : "Opponent joined! Game starting...");
       
-      // Clear any previous game state (especially for rematches)
       const currentRoom = useGameStore.getState().gameRoom;
+      const n = data.maxPlayers || data.players.length;
       if (currentRoom) {
         setGameRoom({
           ...currentRoom,
-          revealedTiles: [[], []],
-          points: [0, 0],
+          revealedTiles: Array.from({ length: n }, () => []),
+          points: Array(n).fill(0),
           currentTurn: data.currentTurn,
           gameState: 'playing',
         });
       }
       
-      // Fetch updated game state with new images
       socketInstance.emit("get-game-state", roomId, (room: GameRoom | null) => {
         if (room) {
           setGameRoom(room);
         }
       });
+    });
+
+    // Royale: phase changes
+    socketInstance.on("phase-change", (data: { phase: RoyalePhase; phaseEndTime: number; round: number; activePlayers: number[] }) => {
+      setRoyalePhase(data.phase);
+      setPhaseEndTime(data.phaseEndTime);
+      setPhaseRound(data.round);
+      setHasActedThisPhase(false);
+      setRoyaleGuessTarget(null);
+
+      const currentPlayerIndex = useGameStore.getState().playerIndex;
+      const isActive = currentPlayerIndex !== null && data.activePlayers.includes(currentPlayerIndex);
+
+      if (data.phase === 'reveal') {
+        showNotification(isActive ? `Round ${data.round}: Reveal a tile!` : "Reveal phase started");
+      } else if (data.phase === 'guess') {
+        showNotification(isActive ? "Guess phase: Submit your guess!" : "Guess phase started");
+      }
+    });
+
+    // Royale: tile revealed
+    socketInstance.on("royale-tile-revealed", (data: { tileIndex: number; targetPlayerIndex: number; revealedBy: number; revealedTiles: number[][]; points: number[] }) => {
+      const currentRoom = useGameStore.getState().gameRoom;
+      if (currentRoom) {
+        setGameRoom({
+          ...currentRoom,
+          revealedTiles: data.revealedTiles,
+          points: data.points,
+        });
+      }
+      const currentPlayerIndex = useGameStore.getState().playerIndex;
+      if (data.revealedBy === currentPlayerIndex) {
+        showNotification("Tile revealed!");
+      }
+    });
+
+    // Royale: correct guess
+    socketInstance.on("royale-correct-guess", (data: { playerIndex: number; targetPlayerIndex: number; guess: string; correctAnswer: string }) => {
+      const currentPlayerIndex = useGameStore.getState().playerIndex;
+      const currentRoom = useGameStore.getState().gameRoom;
+      const guesserName = currentRoom?.players[data.playerIndex]?.name || `Player ${data.playerIndex + 1}`;
+      if (data.playerIndex === currentPlayerIndex) {
+        showNotification(`Correct! You guessed "${data.correctAnswer}"!`);
+      } else {
+        showNotification(`${guesserName} guessed correctly!`);
+      }
+    });
+
+    // Royale: wrong guess
+    socketInstance.on("royale-wrong-guess", (data: { playerIndex: number; targetPlayerIndex: number; guess: string; points: number[] }) => {
+      const currentRoom = useGameStore.getState().gameRoom;
+      if (currentRoom) {
+        setGameRoom({ ...currentRoom, points: data.points });
+      }
+      const currentPlayerIndex = useGameStore.getState().playerIndex;
+      if (data.playerIndex === currentPlayerIndex) {
+        showNotification(`Wrong guess: "${data.guess}"`);
+      }
+    });
+
+    // Royale: placement
+    socketInstance.on("royale-placement", (data: RoyalePlacement) => {
+      useGameStore.getState().addRoyalePlacement(data);
+      const currentPlayerIndex = useGameStore.getState().playerIndex;
+      const ordinal = data.place === 1 ? "1st" : data.place === 2 ? "2nd" : data.place === 3 ? "3rd" : "4th";
+      if (data.playerIndex === currentPlayerIndex) {
+        showNotification(`You got ${ordinal} place!`);
+      } else {
+        showNotification(`${data.name} got ${ordinal} place!`);
+      }
+
+      // Update active players in local state
+      socketInstance.emit("get-game-state", roomId, (room: GameRoom | null) => {
+        if (room) setGameRoom(room);
+      });
+    });
+
+    // Royale: game end
+    socketInstance.on("royale-game-end", (data: { placements: RoyalePlacement[]; imageNames: string[] }) => {
+      try { localStorage.removeItem('gridguesser_active_game'); } catch {}
+      setRoyaleImageNames(data.imageNames);
+
+      // Update all placements
+      const store = useGameStore.getState();
+      store.resetRoyalePlacements();
+      data.placements.forEach(p => store.addRoyalePlacement(p));
+
+      // Reveal all tiles
+      const currentRoom = store.gameRoom;
+      if (currentRoom) {
+        const n = currentRoom.maxPlayers;
+        const allTiles = Array.from({ length: 100 }, (_, i) => i);
+        setGameRoom({
+          ...currentRoom,
+          gameState: 'finished',
+          revealedTiles: Array.from({ length: n }, () => [...allTiles]),
+        });
+      }
+
+      setTimeout(() => setShowRoyaleLeaderboard(true), 3000);
+      refreshProfile().catch(() => {});
     });
 
     // Listen for tile reveals
@@ -596,23 +717,21 @@ export default function GameRoomPage() {
     });
   };
 
-  const handleUsePowerUp = (powerUpId: string, tileIndex?: number, lineType?: 'row' | 'col', lineIndex?: number) => {
+  const handleUsePowerUp = (powerUpId: string, tileIndex?: number, lineType?: 'row' | 'col', lineIndex?: number, targetPlayerIndex?: number) => {
     if (!socket) return;
 
-    // 'cancel' is a client-only action to exit selection mode
     if (powerUpId === 'cancel') {
       setSelectedPowerUp(null);
       return;
     }
 
-    // For power-ups that need tile/grid selection, just enter selection mode
     if ((powerUpId === 'reveal2x2' || powerUpId === 'peek' || powerUpId === 'revealLine') && tileIndex === undefined && lineType === undefined) {
       setSelectedPowerUp(powerUpId);
       if (powerUpId === 'revealLine') setLineDirection('col');
       return;
     }
 
-    socket.emit("use-power-up", { roomId, powerUpId, tileIndex, lineType, lineIndex }, (success: boolean, errorMsg?: string) => {
+    socket.emit("use-power-up", { roomId, powerUpId, tileIndex, lineType, lineIndex, targetPlayerIndex }, (success: boolean, errorMsg?: string) => {
       if (!success) {
         showNotification(errorMsg || "Failed to use power-up");
       }
@@ -632,9 +751,47 @@ export default function GameRoomPage() {
   const handleSubmitGuess = (guess: string) => {
     if (!socket || playerIndex === null) return;
 
+    if (gameRoom?.gameMode === 'royale') {
+      if (royaleGuessTarget === null) {
+        showNotification("Select which player's image to guess first");
+        return;
+      }
+      socket.emit("royale-submit-guess", { roomId, guess, targetPlayerIndex: royaleGuessTarget }, (success: boolean, correct?: boolean, errorMsg?: string) => {
+        if (!success) {
+          showNotification(errorMsg || "Failed to submit guess");
+        } else {
+          setHasActedThisPhase(true);
+        }
+      });
+      return;
+    }
+
     socket.emit("submit-guess", { roomId, guess }, (success: boolean, correct?: boolean, errorMsg?: string) => {
       if (!success) {
         showNotification(errorMsg || "Failed to submit guess");
+      }
+    });
+  };
+
+  const handleRoyaleTileClick = (tileIndex: number, targetPlayerIndex: number) => {
+    if (!socket || playerIndex === null || !gameRoom) return;
+    if (hasActedThisPhase) return;
+    if (royalePhase !== 'reveal') return;
+
+    socket.emit("royale-reveal-tile", { roomId, tileIndex, targetPlayerIndex }, (success: boolean, errorMsg?: string) => {
+      if (success) {
+        setHasActedThisPhase(true);
+      } else {
+        showNotification(errorMsg || "Failed to reveal tile");
+      }
+    });
+  };
+
+  const handleRoyaleSkipGuess = () => {
+    if (!socket) return;
+    socket.emit("royale-skip-guess", { roomId }, (success: boolean, errorMsg?: string) => {
+      if (success) {
+        setHasActedThisPhase(true);
       }
     });
   };
@@ -751,7 +908,7 @@ export default function GameRoomPage() {
             Connecting...
           </h2>
           <p className="text-gray-600 dark:text-gray-400">
-            Waiting for opponent to join...
+            Waiting for players to join...
           </p>
           <RoomCodeDisplay roomCode={roomId} />
         </div>
@@ -759,15 +916,57 @@ export default function GameRoomPage() {
     );
   }
 
+  // Royale lobby: waiting for more players
+  const isRoyale = gameRoom.gameMode === 'royale';
+  if (isRoyale && gameRoom.gameState === 'waiting' && gameRoom.players.length < gameRoom.maxPlayers) {
+    return (
+      <main className="min-h-screen flex items-center justify-center p-8">
+        <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl p-8 max-w-md text-center">
+          <div className="mb-4 flex justify-center text-5xl">&#128081;</div>
+          <h2 className="text-2xl font-bold text-gray-800 dark:text-gray-100 mb-2">
+            Grid Royale
+          </h2>
+          <p className="text-gray-600 dark:text-gray-400 mb-4">
+            Waiting for players... ({gameRoom.players.length}/{gameRoom.maxPlayers})
+          </p>
+          <div className="space-y-2 mb-4">
+            {gameRoom.players.map((p, i) => (
+              <div key={i} className="flex items-center gap-2 justify-center">
+                <span className="w-2 h-2 rounded-full bg-green-500"></span>
+                <span className="text-gray-700 dark:text-gray-300 font-medium">
+                  {p.name} {p.playerIndex === playerIndex && "(You)"}
+                </span>
+              </div>
+            ))}
+            {Array.from({ length: gameRoom.maxPlayers - gameRoom.players.length }).map((_, i) => (
+              <div key={`empty-${i}`} className="flex items-center gap-2 justify-center">
+                <span className="w-2 h-2 rounded-full bg-gray-400 animate-pulse"></span>
+                <span className="text-gray-400 dark:text-gray-500">Waiting...</span>
+              </div>
+            ))}
+          </div>
+          <RoomCodeDisplay roomCode={roomId} />
+        </div>
+      </main>
+    );
+  }
+
   const isMyTurn = gameRoom.currentTurn === playerIndex;
-  const myImageHash = gameRoom.imageHashes[playerIndex];
-  const opponentImageHash = gameRoom.imageHashes[1 - playerIndex];
-  const myRevealedTiles = gameRoom.revealedTiles[playerIndex];
-  const opponentRevealedTiles = gameRoom.revealedTiles[1 - playerIndex];
-  const myPoints = gameRoom.points[playerIndex];
-  const opponentPoints = gameRoom.points[1 - playerIndex];
+  const myImageHash = gameRoom.imageHashes?.[playerIndex] || '';
+  const myRevealedTiles = gameRoom.revealedTiles?.[playerIndex] || [];
+  const myPoints = gameRoom.points?.[playerIndex] || 0;
   const myName = gameRoom.players[playerIndex]?.name || 'You';
-  const opponentName = gameRoom.players[1 - playerIndex]?.name || 'Opponent';
+
+  // Normal mode variables
+  const opponentImageHash = !isRoyale ? (gameRoom.imageHashes?.[1 - playerIndex] || '') : '';
+  const opponentRevealedTiles = !isRoyale ? (gameRoom.revealedTiles?.[1 - playerIndex] || []) : [];
+  const opponentPoints = !isRoyale ? (gameRoom.points?.[1 - playerIndex] || 0) : 0;
+  const opponentName = !isRoyale ? (gameRoom.players[1 - playerIndex]?.name || 'Opponent') : '';
+
+  // Royale-specific computed values
+  const royaleActivePlayers = gameRoom.activePlayers || [];
+  const royalePlacedPlayers = gameRoom.placements || [];
+  const isPlayerActive = isRoyale ? royaleActivePlayers.includes(playerIndex) : true;
 
   return (
     <main className="min-h-screen p-4 md:p-8">
@@ -811,6 +1010,127 @@ export default function GameRoomPage() {
           )}
         </AnimatePresence>
 
+        {isRoyale ? (
+          /* ═══ ROYALE MODE UI ═══ */
+          <>
+            {/* Phase Timer */}
+            {gameRoom.gameState === 'playing' && (
+              <div className="mb-6">
+                <PhaseTimer
+                  phase={royalePhase}
+                  phaseEndTime={phaseEndTime}
+                  round={phaseRound}
+                  hasActed={hasActedThisPhase}
+                />
+              </div>
+            )}
+
+            {/* Player Info Cards - all players */}
+            <div className={`grid grid-cols-2 md:grid-cols-${gameRoom.maxPlayers} gap-3 mb-6`}>
+              {gameRoom.players.map((p) => (
+                <PlayerInfo
+                  key={p.playerIndex}
+                  playerName={p.name}
+                  points={gameRoom.points[p.playerIndex] || 0}
+                  isActive={royaleActivePlayers.includes(p.playerIndex) && gameRoom.gameState === 'playing'}
+                  isYou={p.playerIndex === playerIndex}
+                />
+              ))}
+            </div>
+
+            {/* Placement badges */}
+            {royalePlacements.length > 0 && gameRoom.gameState === 'playing' && (
+              <div className="flex gap-2 mb-4 flex-wrap">
+                {royalePlacements.map((p) => {
+                  const ordinal = p.place === 1 ? "1st" : p.place === 2 ? "2nd" : p.place === 3 ? "3rd" : "4th";
+                  return (
+                    <span key={p.playerIndex} className="px-3 py-1 bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-200 rounded-full text-sm font-medium">
+                      {p.name}: {ordinal}
+                    </span>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Notification */}
+            {!isPlayerActive && gameRoom.gameState === 'playing' && (
+              <div className="mb-4 p-3 bg-green-100 dark:bg-green-900/30 border border-green-300 dark:border-green-700 rounded-lg text-center">
+                <p className="text-green-700 dark:text-green-300 font-medium">
+                  You&apos;ve been placed! Watching the remaining players...
+                </p>
+              </div>
+            )}
+
+            {/* 2x2 Grid Layout */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+              {gameRoom.players.map((p) => {
+                const isMe = p.playerIndex === playerIndex;
+                const isPlaced = royalePlacedPlayers.includes(p.playerIndex);
+                const canClick = !isMe && isPlayerActive && royalePhase === 'reveal' && !hasActedThisPhase && gameRoom.gameState === 'playing';
+                const placement = royalePlacements.find(pl => pl.playerIndex === p.playerIndex);
+
+                return (
+                  <div key={p.playerIndex} className={`flex flex-col items-center ${isMe ? 'opacity-70' : ''}`}>
+                    <h3 className="text-lg font-semibold mb-2 text-gray-800 dark:text-gray-100 flex items-center gap-2">
+                      <span className={isMe ? "text-blue-600 dark:text-blue-400" : "text-purple-600 dark:text-purple-400"}>
+                        {isMe ? "Your" : `${p.name}'s`}
+                      </span> Grid
+                      {isMe && <span className="text-xs bg-blue-100 dark:bg-blue-900/30 px-2 py-0.5 rounded-full text-blue-600 dark:text-blue-400">You</span>}
+                      {placement && (
+                        <span className="text-xs bg-amber-100 dark:bg-amber-900/30 px-2 py-0.5 rounded-full text-amber-700 dark:text-amber-300">
+                          {placement.place === 1 ? "1st" : placement.place === 2 ? "2nd" : placement.place === 3 ? "3rd" : "4th"}
+                        </span>
+                      )}
+                    </h3>
+                    <GameGrid
+                      key={`royale-${p.playerIndex}-${gameRoom.imageHashes[p.playerIndex]}-${gameResetKey}`}
+                      imageHash={gameRoom.imageHashes[p.playerIndex] || ''}
+                      revealedTiles={gameRoom.revealedTiles[p.playerIndex] || []}
+                      isMyTurn={canClick}
+                      isOpponentGrid={!isMe}
+                      onTileClick={canClick ? (tileIndex) => handleRoyaleTileClick(tileIndex, p.playerIndex) : undefined}
+                      disabled={!canClick}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Guess Phase UI */}
+            {royalePhase === 'guess' && isPlayerActive && gameRoom.gameState === 'playing' && (
+              <div className="max-w-2xl mx-auto space-y-4">
+                <div className="text-center">
+                  <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">
+                    Select whose image to guess, then type your answer:
+                  </p>
+                  <GridSelector
+                    players={gameRoom.players}
+                    myPlayerIndex={playerIndex}
+                    activePlayers={royaleActivePlayers}
+                    placedPlayers={royalePlacedPlayers}
+                    selectedTarget={royaleGuessTarget}
+                    onSelectTarget={setRoyaleGuessTarget}
+                  />
+                </div>
+                <GuessInput
+                  onSubmitGuess={handleSubmitGuess}
+                  disabled={hasActedThisPhase || royaleGuessTarget === null}
+                  gameState={gameRoom.gameState}
+                />
+                {!hasActedThisPhase && (
+                  <button
+                    onClick={handleRoyaleSkipGuess}
+                    className="w-full py-2 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
+                  >
+                    Skip guessing this round
+                  </button>
+                )}
+              </div>
+            )}
+          </>
+        ) : (
+          /* ═══ NORMAL MODE UI ═══ */
+          <>
         {/* Player Info Cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
           <PlayerInfo
@@ -882,7 +1202,7 @@ export default function GameRoomPage() {
                   <div className="flex-1 min-w-0">
                     <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Opponent&apos;s Image</p>
                     <div className="font-mono text-2xl tracking-[0.3em] text-gray-800 dark:text-gray-100 overflow-x-auto whitespace-nowrap">
-                      {gameRoom.maskedImageNames[playerIndex].split("").map((ch, i) => (
+                      {gameRoom.maskedImageNames[playerIndex]?.split("").map((ch, i) => (
                         <span
                           key={i}
                           className={ch === "_" ? "text-gray-400 dark:text-gray-500" : "text-green-600 dark:text-green-400 font-bold"}
@@ -1098,14 +1418,32 @@ export default function GameRoomPage() {
               myPoints={myPoints}
               opponentPoints={opponentPoints}
               isMyTurn={isMyTurn}
-              onUsePowerUp={(powerUpId, tileIndex, lineType, lineIndex) => {
-                handleUsePowerUp(powerUpId, tileIndex, lineType, lineIndex);
+              onUsePowerUp={(powerUpId, tileIndex, lineType, lineIndex, targetPlayerIndex) => {
+                handleUsePowerUp(powerUpId, tileIndex, lineType, lineIndex, targetPlayerIndex);
               }}
               disabled={gameRoom.gameState !== 'playing'}
               isFrozen={isFrozen}
+              gameMode={gameRoom.gameMode}
+              players={gameRoom.players}
+              myPlayerIndex={playerIndex}
+              activePlayers={royaleActivePlayers}
             />
           </div>
         </div>
+          </>
+        )}
+
+        {/* Royale Leaderboard Modal */}
+        <AnimatePresence>
+          {showRoyaleLeaderboard && isRoyale && gameRoom.gameState === 'finished' && (
+            <RoyaleLeaderboard
+              placements={royalePlacements}
+              imageNames={royaleImageNames}
+              myPlayerIndex={playerIndex}
+              onClose={() => setShowRoyaleLeaderboard(false)}
+            />
+          )}
+        </AnimatePresence>
       </div>
     </main>
   );

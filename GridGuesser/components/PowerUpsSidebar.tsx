@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Icon from "./Icon";
+import { Player, GameMode } from "@/lib/types";
 
 export interface PowerUp {
   id: string;
@@ -9,17 +10,21 @@ export interface PowerUp {
   cost: number;
   description: string;
   icon: string;
-  // How the power-up is activated
   activation: 'instant' | 'selectTile' | 'selectLine';
+  needsTarget?: boolean; // in royale, requires choosing an opponent
 }
 
 interface PowerUpsSidebarProps {
   myPoints: number;
   opponentPoints: number;
   isMyTurn: boolean;
-  onUsePowerUp: (powerUpId: string, tileIndex?: number, lineType?: 'row' | 'col', lineIndex?: number) => void;
+  onUsePowerUp: (powerUpId: string, tileIndex?: number, lineType?: 'row' | 'col', lineIndex?: number, targetPlayerIndex?: number) => void;
   disabled?: boolean;
-  isFrozen?: boolean; // player is frozen and can't use power-ups this turn
+  isFrozen?: boolean;
+  gameMode?: GameMode;
+  players?: Player[];
+  myPlayerIndex?: number;
+  activePlayers?: number[];
 }
 
 const ITEMS_PER_PAGE = 3;
@@ -37,9 +42,10 @@ const powerUps: PowerUp[] = [
     id: 'skip',
     name: 'Skip Turn',
     cost: 5,
-    description: 'Opponent skips their next turn',
+    description: 'Target skips their next reveal phase',
     icon: 'clock',
     activation: 'instant',
+    needsTarget: true,
   },
   {
     id: 'revealLine',
@@ -53,9 +59,10 @@ const powerUps: PowerUp[] = [
     id: 'freeze',
     name: 'Freeze',
     cost: 6,
-    description: 'Block opponent from using power-ups next turn',
+    description: 'Block a player from using power-ups next turn',
     icon: 'freeze',
     activation: 'instant',
+    needsTarget: true,
   },
   {
     id: 'fog',
@@ -69,7 +76,7 @@ const powerUps: PowerUp[] = [
     id: 'reveal2x2',
     name: 'Reveal 2x2',
     cost: 8,
-    description: 'Reveal a 2x2 area on opponent\'s grid',
+    description: 'Reveal a 2x2 area on an opponent\'s grid',
     icon: 'grid2x2',
     activation: 'selectTile',
   },
@@ -77,9 +84,10 @@ const powerUps: PowerUp[] = [
     id: 'nuke',
     name: 'Nuke',
     cost: 30,
-    description: 'Reveal the entire opponent\'s image (no more guess points)',
+    description: 'Reveal a player\'s entire image (no more guess points)',
     icon: 'nuke',
     activation: 'instant',
+    needsTarget: true,
   },
 ];
 
@@ -90,28 +98,51 @@ export default function PowerUpsSidebar({
   onUsePowerUp,
   disabled = false,
   isFrozen = false,
+  gameMode = 'normal',
+  players = [],
+  myPlayerIndex,
+  activePlayers = [],
 }: PowerUpsSidebarProps) {
   const [selectedPowerUp, setSelectedPowerUp] = useState<string | null>(null);
+  const [selectingTarget, setSelectingTarget] = useState<string | null>(null);
   const [page, setPage] = useState(0);
 
+  const isRoyale = gameMode === 'royale';
   const totalPages = Math.ceil(powerUps.length / ITEMS_PER_PAGE);
   const visiblePowerUps = powerUps.slice(page * ITEMS_PER_PAGE, (page + 1) * ITEMS_PER_PAGE);
+
+  const opponents = isRoyale
+    ? players.filter(p => p.playerIndex !== myPlayerIndex && activePlayers.includes(p.playerIndex))
+    : [];
 
   const handlePowerUpClick = (powerUp: PowerUp) => {
     if (disabled || isFrozen || myPoints < powerUp.cost || !isMyTurn) return;
 
+    // In royale, if the power-up needs a target, show target picker
+    if (isRoyale && powerUp.needsTarget) {
+      setSelectingTarget(powerUp.id);
+      return;
+    }
+
     if (powerUp.activation === 'selectTile') {
       setSelectedPowerUp(powerUp.id);
-      onUsePowerUp(powerUp.id); // Notify parent to enter tile-select mode
+      onUsePowerUp(powerUp.id);
     } else {
-      // Instant power-ups
       onUsePowerUp(powerUp.id);
       setSelectedPowerUp(null);
     }
   };
 
+  const handleTargetSelected = (targetPlayerIndex: number) => {
+    if (!selectingTarget) return;
+    // For targeted instant power-ups in royale
+    onUsePowerUp(selectingTarget, undefined, undefined, undefined, targetPlayerIndex);
+    setSelectingTarget(null);
+  };
+
   const handleCancel = () => {
     setSelectedPowerUp(null);
+    setSelectingTarget(null);
     onUsePowerUp('cancel');
   };
 
@@ -161,6 +192,29 @@ export default function PowerUpsSidebar({
           </div>
         </div>
       </div>
+
+      {/* Target Picker (Royale) */}
+      {selectingTarget && isRoyale && (
+        <div className="bg-orange-100 dark:bg-orange-900/30 border-2 border-orange-400 dark:border-orange-600 rounded-lg p-4 animate-fade-in">
+          <p className="text-sm text-orange-900 dark:text-orange-100 font-bold mb-2">
+            Choose target for {powerUps.find(p => p.id === selectingTarget)?.name}:
+          </p>
+          <div className="space-y-2">
+            {opponents.map((p) => (
+              <button
+                key={p.playerIndex}
+                onClick={() => handleTargetSelected(p.playerIndex)}
+                className="w-full px-3 py-2 bg-orange-200 dark:bg-orange-800 hover:bg-orange-300 dark:hover:bg-orange-700 text-orange-900 dark:text-orange-100 rounded-lg font-medium text-sm transition-colors"
+              >
+                {p.name}
+              </button>
+            ))}
+          </div>
+          <button onClick={handleCancel} className="mt-2 text-xs text-orange-700 dark:text-orange-300 hover:underline">
+            Cancel
+          </button>
+        </div>
+      )}
 
       {/* Instructions for active power-ups */}
       {selectedPowerUp === 'reveal2x2' && (

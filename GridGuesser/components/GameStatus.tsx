@@ -6,8 +6,8 @@ interface GameStatusProps {
   isMyTurn: boolean;
   opponentConnected: boolean;
   gameState: 'waiting' | 'playing' | 'finished';
-  winner?: 0 | 1;
-  playerIndex: 0 | 1 | null;
+  winner?: number;
+  playerIndex: number | null;
   myName?: string;
   opponentName?: string;
 }

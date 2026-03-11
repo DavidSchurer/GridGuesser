@@ -6,7 +6,7 @@ if (typeof __dirname !== 'undefined') {
 }
 
 import { docClient, TABLES, PutCommand, GetCommand, UpdateCommand, QueryCommand, ScanCommand } from "./dynamodb";
-import { GameRoom, DynamicImageMetadata } from "./types";
+import { GameRoom, GameMode, DynamicImageMetadata } from "./types";
 import { randomUUID } from "crypto";
 import { cacheGameRoom, getCachedGameRoom, deleteCachedGameRoom } from "./redisClient";
 
@@ -19,32 +19,46 @@ export async function createGameRoom(
   creatorUserId: string | undefined,
   creatorName: string,
   category: string,
-  customQuery?: string
+  customQuery?: string,
+  gameMode: GameMode = 'normal',
+  maxPlayers: number = 2
 ): Promise<{ success: boolean; room?: GameRoom; error?: string }> {
   try {
     const now = Date.now();
+    const n = maxPlayers;
     
     const room: GameRoom = {
       roomId,
       players: [{
         id: creatorUserId || randomUUID(),
-        socketId: "", // Will be updated when socket connects
+        socketId: "",
         playerIndex: 0,
         name: creatorName,
       }],
       currentTurn: 0,
       gameState: "waiting",
-      revealedTiles: [[], []],
-      images: ["", ""],
-      imageHashes: ["", ""],
-      imageNames: ["", ""],
-      points: [0, 0],
+      revealedTiles: Array.from({ length: n }, () => []),
+      images: Array(n).fill(""),
+      imageHashes: Array(n).fill(""),
+      imageNames: Array(n).fill(""),
+      points: Array(n).fill(0),
       createdAt: now,
       category,
-      customQuery, // Store custom query if provided
-      imageMetadata: [null, null],
-      revealedHints: [[], []],
+      customQuery,
+      imageMetadata: Array(n).fill(null),
+      revealedHints: Array.from({ length: n }, () => []),
       skipTurnActive: false,
+      gameMode,
+      maxPlayers: n,
+      ...(gameMode === 'royale' ? {
+        royalePhase: 'idle' as const,
+        placements: [],
+        activePlayers: [],
+        skipNextReveal: Array(n).fill(false),
+        revealedThisPhase: {},
+        guessedThisPhase: {},
+        phaseRound: 0,
+      } : {}),
     };
 
     const command = new PutCommand({
@@ -113,7 +127,7 @@ export async function updateGameRoom(room: GameRoom): Promise<{ success: boolean
 // Update socket IDs when players connect
 export async function updatePlayerSocketId(
   roomId: string,
-  playerIndex: 0 | 1,
+  playerIndex: number,
   socketId: string
 ): Promise<{ success: boolean; error?: string }> {
   try {
@@ -130,7 +144,7 @@ export async function updatePlayerSocketId(
   }
 }
 
-// Add second player to room
+// Add player to room (supports N players for royale)
 export async function addPlayerToRoom(
   roomId: string,
   userId: string | undefined,
@@ -144,7 +158,7 @@ export async function addPlayerToRoom(
       return { success: false, error: "Room not found" };
     }
 
-    if (room.players.length >= 2) {
+    if (room.players.length >= room.maxPlayers) {
       return { success: false, error: "Room is full" };
     }
 
@@ -152,10 +166,11 @@ export async function addPlayerToRoom(
       return { success: false, error: "Game already in progress" };
     }
 
+    const newIndex = room.players.length;
     room.players.push({
       id: userId || randomUUID(),
       socketId,
-      playerIndex: 1,
+      playerIndex: newIndex,
       name: playerName,
     });
 
@@ -167,10 +182,10 @@ export async function addPlayerToRoom(
   }
 }
 
-// Update game state and images (with retry logic for failed downloads)
+// Update game state and images (supports N images for royale)
 export async function updateGameImages(
   roomId: string,
-  imageMetadata: [DynamicImageMetadata | null, DynamicImageMetadata | null]
+  imageMetadata: (DynamicImageMetadata | null)[]
 ): Promise<{ success: boolean; error?: string }> {
   try {
     const room = await getGameRoom(roomId);
@@ -178,36 +193,37 @@ export async function updateGameImages(
       return { success: false, error: "Room not found" };
     }
 
-    // Generate tiles for both images
     const { generateTiles } = await import("./tileGenerator");
-    
-    const image1Url = imageMetadata[0]?.url || "";
-    const image2Url = imageMetadata[1]?.url || "";
 
-    console.log("Generating tiles for both images...");
-    const [tiles1Result, tiles2Result] = await Promise.all([
-      generateTiles(image1Url),
-      generateTiles(image2Url),
-    ]);
+    const imageUrls = imageMetadata.map(m => m?.url || "");
 
-    if (!tiles1Result.success || !tiles2Result.success) {
-      console.error("Failed to generate tiles - one or more images failed to download");
-      console.error(`Image 1 (${imageMetadata[0]?.title}): ${tiles1Result.success ? 'SUCCESS' : 'FAILED'}`);
-      console.error(`Image 2 (${imageMetadata[1]?.title}): ${tiles2Result.success ? 'SUCCESS' : 'FAILED'}`);
+    console.log(`Generating tiles for ${imageMetadata.length} images...`);
+    const tileResults = await Promise.all(
+      imageUrls.map(url => generateTiles(url))
+    );
+
+    const allSucceeded = tileResults.every(r => r.success);
+    if (!allSucceeded) {
+      for (let i = 0; i < tileResults.length; i++) {
+        console.error(`Image ${i} (${imageMetadata[i]?.title}): ${tileResults[i].success ? 'SUCCESS' : 'FAILED'}`);
+      }
       return { success: false, error: "Failed to generate image tiles - images may be protected or unavailable" };
     }
 
-    room.images = [image1Url, image2Url];
-    room.imageHashes = [tiles1Result.imageHash, tiles2Result.imageHash];
-    room.imageNames = [
-      imageMetadata[0]?.title || "",
-      imageMetadata[1]?.title || ""
-    ];
+    room.images = imageUrls;
+    room.imageHashes = tileResults.map(r => r.imageHash);
+    room.imageNames = imageMetadata.map(m => m?.title || "");
     room.imageMetadata = imageMetadata;
     room.gameState = "playing";
 
-    console.log(`✅ Tiles generated successfully: ${tiles1Result.imageHash}, ${tiles2Result.imageHash}`);
-    console.log(`✅ Game ready with answers: "${room.imageNames[0]}" and "${room.imageNames[1]}"`);
+    if (room.gameMode === 'royale') {
+      room.activePlayers = room.players.map(p => p.playerIndex);
+    }
+
+    const hashes = tileResults.map(r => r.imageHash).join(', ');
+    const names = room.imageNames.map(n => `"${n}"`).join(' and ');
+    console.log(`✅ Tiles generated successfully: ${hashes}`);
+    console.log(`✅ Game ready with answers: ${names}`);
     return await updateGameRoom(room);
   } catch (error) {
     console.error("Error updating game images:", error);

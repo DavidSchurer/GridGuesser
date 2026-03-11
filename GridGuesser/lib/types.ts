@@ -1,33 +1,50 @@
+export type GameMode = 'normal' | 'royale';
+export type RoyalePhase = 'reveal' | 'guess' | 'idle';
+
 export interface Player {
   id: string;
   socketId: string;
-  playerIndex: 0 | 1;
+  playerIndex: number;
   name: string;
 }
 
 export interface GameRoom {
   roomId: string;
   players: Player[];
-  currentTurn: 0 | 1;
+  currentTurn: number;
   gameState: 'waiting' | 'playing' | 'finished';
-  revealedTiles: [number[], number[]]; // tile indices for each player
-  images: [string, string]; // assigned image URLs (original URLs, not sent to client)
-  imageHashes: [string, string]; // MD5 hashes of images for tile access
-  imageNames: [string, string]; // names for guess validation
-  points: [number, number]; // points for each player
-  winner?: 0 | 1;
+  revealedTiles: number[][]; // tile indices for each player
+  images: string[]; // assigned image URLs (original URLs, not sent to client)
+  imageHashes: string[]; // MD5 hashes of images for tile access
+  imageNames: string[]; // names for guess validation
+  points: number[]; // points for each player
+  winner?: number;
   createdAt: number;
-  category?: string; // selected category for image fetching
-  customQuery?: string; // custom search query when category is 'custom'
-  imageMetadata?: [DynamicImageMetadata | null, DynamicImageMetadata | null]; // full image data
-  revealedHints?: [number[], number[]]; // indices of revealed characters for each player's opponent image
-  maskedImageNames?: [string, string]; // masked opponent names per player (sent by server, not stored in DB)
-  skipTurnActive?: boolean; // if true, current player gets an extra turn
-  freezeActive?: [boolean, boolean]; // if true, that player can't use power-ups on their current turn
-  rematchRequests?: [boolean, boolean]; // tracks which players want a rematch
-  rematchCategory?: string; // category chosen for next rematch
-  rematchCustomQuery?: string; // custom query chosen for next rematch
-  nukeUsed?: [boolean, boolean]; // tracks which players have used nuke (no more guess points)
+  category?: string;
+  customQuery?: string;
+  imageMetadata?: (DynamicImageMetadata | null)[];
+  revealedHints?: number[][];
+  maskedImageNames?: string[];
+  skipTurnActive?: boolean; // normal mode: current player gets an extra turn
+  freezeActive?: boolean[];
+  rematchRequests?: boolean[];
+  rematchCategory?: string;
+  rematchCustomQuery?: string;
+  nukeUsed?: boolean[];
+
+  // Game mode
+  gameMode: GameMode;
+  maxPlayers: number; // 2 for normal, 3 or 4 for royale
+
+  // Royale-specific fields
+  royalePhase?: RoyalePhase;
+  phaseEndTime?: number; // server timestamp when current phase expires
+  phaseRound?: number; // current round number
+  revealedThisPhase?: Record<number, boolean>; // which players have revealed this phase
+  guessedThisPhase?: Record<number, boolean>; // which players have guessed this phase
+  placements?: number[]; // ordered player indices by finish (index 0 = 1st place)
+  skipNextReveal?: boolean[]; // royale: player can't reveal next phase (from skip power-up)
+  activePlayers?: number[]; // royale: player indices still competing (not yet placed)
 }
 
 export interface DynamicImageMetadata {
@@ -49,22 +66,30 @@ export interface ImageMetadata {
 export interface TileRevealEvent {
   roomId: string;
   tileIndex: number;
-  playerIndex: 0 | 1;
+  playerIndex: number;
 }
 
 export interface GuessSubmitEvent {
   roomId: string;
   guess: string;
-  playerIndex: 0 | 1;
+  playerIndex: number;
 }
 
 export interface GameStateUpdate {
   gameState: GameRoom['gameState'];
-  currentTurn: 0 | 1;
-  revealedTiles: [number[], number[]];
-  points: [number, number];
-  winner?: 0 | 1;
+  currentTurn: number;
+  revealedTiles: number[][];
+  points: number[];
+  winner?: number;
   winnerGuess?: string;
+}
+
+export interface RoyalePlacement {
+  playerIndex: number;
+  place: number; // 1-based
+  name: string;
+  points: number;
+  guess?: string;
 }
 
 export type PowerUpId = 'skip' | 'reveal2x2' | 'nuke' | 'fog' | 'revealLine' | 'freeze' | 'peek';
@@ -80,9 +105,10 @@ export interface PowerUp {
 export interface UsePowerUpEvent {
   roomId: string;
   powerUpId: PowerUpId;
-  tileIndex?: number; // For reveal2x2/peek, the center/top-left tile
-  lineType?: 'row' | 'col'; // For revealLine
-  lineIndex?: number; // Row or column number (0-9)
+  tileIndex?: number;
+  lineType?: 'row' | 'col';
+  lineIndex?: number;
+  targetPlayerIndex?: number; // royale: which opponent to target
 }
 
 // User Authentication Types

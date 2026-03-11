@@ -5,8 +5,10 @@ import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import UserProfile from "../components/UserProfile";
 import CategorySelector from "../components/CategorySelector";
+import GameModeSelector from "../components/GameModeSelector";
 import { useAuth } from "../lib/authContext";
 import { connectSocket, disconnectSocket } from "../lib/socket";
+import { GameMode } from "../lib/types";
 
 interface RejoinInfo {
   roomId: string;
@@ -22,7 +24,10 @@ export default function Home() {
   const [playerName, setPlayerName] = useState("");
   const [isCreating, setIsCreating] = useState(false);
   const [showNameInput, setShowNameInput] = useState(false);
+  const [showModeSelection, setShowModeSelection] = useState(false);
   const [showCategorySelection, setShowCategorySelection] = useState(false);
+  const [selectedMode, setSelectedMode] = useState<GameMode>("normal");
+  const [maxPlayers, setMaxPlayers] = useState(4);
   const [selectedCategory, setSelectedCategory] = useState("landmarks");
   const [customQuery, setCustomQuery] = useState("");
   const [action, setAction] = useState<'create' | 'join' | null>(null);
@@ -65,6 +70,11 @@ export default function Home() {
 
   const handleCreateClick = () => {
     setAction('create');
+    setShowModeSelection(true);
+  };
+
+  const handleModeSelected = () => {
+    setShowModeSelection(false);
     setShowCategorySelection(true);
   };
 
@@ -88,7 +98,10 @@ export default function Home() {
       setIsCreating(true);
       const code = Math.floor(100000 + Math.random() * 900000).toString();
 
-      let url = `/game/${code}?name=${encodeURIComponent(finalName)}&category=${encodeURIComponent(selectedCategory)}`;
+      let url = `/game/${code}?name=${encodeURIComponent(finalName)}&category=${encodeURIComponent(selectedCategory)}&gameMode=${selectedMode}`;
+      if (selectedMode === 'royale') {
+        url += `&maxPlayers=${maxPlayers}`;
+      }
       if (selectedCategory === 'custom' && customQuery.trim()) {
         url += `&customQuery=${encodeURIComponent(customQuery.trim())}`;
       }
@@ -102,6 +115,7 @@ export default function Home() {
   const handleBackToMain = () => {
     setShowNameInput(false);
     setShowCategorySelection(false);
+    setShowModeSelection(false);
     setAction(null);
     setPlayerName("");
   };
@@ -113,6 +127,11 @@ export default function Home() {
     } else {
       handleBackToMain();
     }
+  };
+
+  const handleBackFromCategory = () => {
+    setShowCategorySelection(false);
+    setShowModeSelection(true);
   };
 
   return (
@@ -132,11 +151,44 @@ export default function Home() {
         </div>
 
         <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl p-8 space-y-6">
-          {showCategorySelection ? (
-            /* Category Selection Screen */
+          {showModeSelection ? (
+            /* Game Mode Selection Screen */
             <div className="space-y-6 animate-slide-up">
               <button
                 onClick={handleBackToMain}
+                className="text-sm text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 flex items-center gap-1"
+              >
+                ← Back
+              </button>
+              
+              <div>
+                <h2 className="text-2xl font-semibold text-gray-800 dark:text-gray-100 mb-2">
+                  Choose Game Mode
+                </h2>
+                <p className="text-sm text-gray-600 dark:text-gray-400 mb-6">
+                  Select how you want to play
+                </p>
+                
+                <GameModeSelector
+                  selectedMode={selectedMode}
+                  onModeChange={setSelectedMode}
+                  maxPlayers={maxPlayers}
+                  onMaxPlayersChange={setMaxPlayers}
+                />
+                
+                <button
+                  onClick={handleModeSelected}
+                  className="w-full mt-6 py-4 px-6 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white rounded-xl font-semibold text-lg transition-all duration-200 transform hover:scale-105"
+                >
+                  Continue
+                </button>
+              </div>
+            </div>
+          ) : showCategorySelection ? (
+            /* Category Selection Screen */
+            <div className="space-y-6 animate-slide-up">
+              <button
+                onClick={handleBackFromCategory}
                 className="text-sm text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 flex items-center gap-1"
               >
                 ← Back
