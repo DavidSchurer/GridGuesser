@@ -152,6 +152,8 @@ function makeFakeRoom(overrides: Partial<GameRoom> = {}): GameRoom {
     imageMetadata: [null, null],
     revealedHints: [[], []],
     skipTurnActive: false,
+    gameMode: 'normal',
+    maxPlayers: 2,
     ...overrides,
   };
 }
