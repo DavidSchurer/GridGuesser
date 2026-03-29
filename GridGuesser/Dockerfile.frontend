@@ -1,0 +1,83 @@
+# =============================================================================
+#  GridGuesser — Frontend Dockerfile  (Next.js)
+#
+#  This uses a MULTI-STAGE BUILD — one of Docker's most important patterns.
+#
+#  Stage 1 ("builder"):  Install ALL deps, compile the Next.js app.
+#  Stage 2 ("runner"):   Start fresh, copy ONLY the build output + prod deps.
+#
+#  Why? The builder stage has devDependencies, source maps, TypeScript source,
+#  etc. — none of that is needed at runtime. By starting a fresh image in
+#  stage 2, the final image is ~200 MB instead of ~800 MB.
+# =============================================================================
+
+
+# ==========================
+#  STAGE 1: Build the app
+# ==========================
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+
+# Install ALL dependencies (including devDependencies like tailwindcss,
+# postcss, eslint, typescript, etc.) because we need them to build.
+COPY package.json package-lock.json ./
+RUN npm ci
+
+# Copy source code
+COPY . .
+
+# -- ARG vs ENV --
+# ARG = available only during "docker build". Used here for NEXT_PUBLIC_*
+# variables because Next.js inlines them into the JavaScript bundle at build
+# time. They are NOT available at runtime.
+#
+# ENV = available at runtime when the container is running.
+#
+# For Next.js: any variable starting with NEXT_PUBLIC_ must be set at BUILD
+# time (via ARG) so it gets baked into the client-side JavaScript.
+ARG NEXT_PUBLIC_APP_URL=http://localhost:3000
+ARG NEXT_PUBLIC_SOCKET_URL=http://localhost:3001
+ARG NEXT_PUBLIC_API_URL=http://localhost:3001/api
+
+# Make the ARGs available to the build process as environment variables
+ENV NEXT_PUBLIC_APP_URL=$NEXT_PUBLIC_APP_URL
+ENV NEXT_PUBLIC_SOCKET_URL=$NEXT_PUBLIC_SOCKET_URL
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+
+# Build the optimized production bundle (.next/ directory)
+RUN npm run build
+
+
+# ==========================
+#  STAGE 2: Run the app
+# ==========================
+# Start from a FRESH image — nothing from stage 1 carries over unless we
+# explicitly COPY it. This is what makes the final image small.
+FROM node:20-alpine AS runner
+
+WORKDIR /app
+
+# Set production mode
+ENV NODE_ENV=production
+
+# Copy only what we need from the builder stage:
+# 1. The compiled Next.js output
+COPY --from=builder /app/.next ./.next
+# 2. The public folder (static assets like SVGs)
+COPY --from=builder /app/public ./public
+# 3. The Next.js config
+COPY --from=builder /app/next.config.js ./
+# 4. Package manifests — npm ci requires BOTH package.json and package-lock.json
+COPY --from=builder /app/package.json /app/package-lock.json ./
+
+# Install only production dependencies (no devDependencies)
+# We do this in stage 2 instead of copying node_modules from stage 1
+# to keep the layer clean and avoid platform-specific binary issues.
+RUN npm ci --omit=dev
+
+# Next.js runs on port 3000 by default
+EXPOSE 3000
+
+# Start the Next.js production server
+CMD ["npx", "next", "start"]

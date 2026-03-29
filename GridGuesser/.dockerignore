@@ -1,0 +1,29 @@
+# Dependencies — always reinstalled inside the container
+node_modules
+
+# Next.js build output — rebuilt inside the frontend container
+.next
+out
+
+# Test & coverage artifacts
+coverage
+
+# Environment files — passed via env_file in docker-compose.yml, not baked into the image
+.env*.local
+
+# Generated tile images — created at runtime by the backend
+public/tiles
+
+# Git metadata
+.git
+.gitignore
+
+# IDE / OS junk
+.DS_Store
+*.pem
+.vscode
+.cursor
+
+# Build artifacts
+build
+*.tsbuildinfo

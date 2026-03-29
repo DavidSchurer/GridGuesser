@@ -67,6 +67,10 @@ export async function createGameRoom(
     });
 
     await docClient.send(command);
+
+    // Pre-populate Redis cache so the first getGameRoom call is a cache hit
+    await cacheGameRoom(roomId, room);
+
     return { success: true, room };
   } catch (error) {
     console.error("Error creating game room:", error);

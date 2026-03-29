@@ -1,0 +1,90 @@
+# =============================================================================
+#  GridGuesser — Docker Compose
+#
+#  This file defines all the services that make up GridGuesser and how they
+#  connect to each other. Run "docker compose up --build" to start everything.
+#
+#  NETWORKING — How containers talk to each other:
+#  -----------------------------------------------
+#  Docker Compose creates a private network for these services automatically.
+#
+#  1. Containers reference each other by SERVICE NAME, not "localhost".
+#     The backend container can be reached at "http://backend:3001" from
+#     inside any other container in this file.
+#
+#  2. "ports" publishes a container's port to YOUR machine (the host).
+#     "3001:3001" means: forward port 3001 on your laptop → port 3001
+#     inside the container. Without this, only other containers can reach it.
+#
+#  3. "localhost" inside a container means THAT container, not your laptop.
+#     This is the most common source of confusion.
+#
+#  4. Your BROWSER runs on your laptop (the host), not inside a container.
+#     So the browser connects to http://localhost:3001 (published port),
+#     which Docker forwards into the backend container.
+#
+#  Visual:
+#
+#    Your Browser (on your laptop)
+#      |
+#      |--- http://localhost:3000 ---> [frontend container, port 3000]
+#      |--- http://localhost:3001 ---> [backend container, port 3001]
+#
+#    Inside Docker's private network:
+#      frontend ---> http://backend:3001   (server-side requests)
+#      backend  ---> http://frontend:3000  (if it ever needed to)
+#
+# =============================================================================
+
+services:
+  # --------------------------------------------------------------------------
+  #  BACKEND — Express + Socket.IO server
+  # --------------------------------------------------------------------------
+  backend:
+    # "build: ." means "use the Dockerfile in the current directory"
+    build: .
+
+    # Publish port 3001 from the container to your laptop.
+    # Format: "HOST_PORT:CONTAINER_PORT"
+    ports:
+      - "3001:3001"
+
+    # Load environment variables from your .env.local file.
+    # This is how AWS keys, JWT secret, Google API keys, etc. get into the
+    # container WITHOUT baking them into the Docker image.
+    env_file:
+      - .env.local
+
+    # Override the CORS origin so the backend accepts requests from the
+    # frontend running on your laptop's port 3000.
+    environment:
+      - NEXT_PUBLIC_APP_URL=http://localhost:3000
+      - PORT=3001
+
+    # The "tiles" volume persists generated image tiles across container
+    # restarts. Without this, tiles would be lost every time you stop the
+    # container and re-generated on the next game.
+    volumes:
+      - tiles_data:/app/public/tiles
+
+  # --------------------------------------------------------------------------
+  #  FRONTEND — Next.js production server
+  # --------------------------------------------------------------------------
+  frontend:
+    # Use the separate Dockerfile.frontend for the multi-stage build.
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+
+    ports:
+      - "3000:3000"
+
+    # "depends_on" tells Docker Compose to start the backend BEFORE the
+    # frontend. It does NOT wait for the backend to be "ready" — just started.
+    depends_on:
+      - backend
+
+# Named volume for persisting generated tiles across container restarts.
+# Docker manages the storage location — you don't need to think about where.
+volumes:
+  tiles_data:

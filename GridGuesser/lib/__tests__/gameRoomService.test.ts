@@ -72,6 +72,7 @@ vi.mock('../redisClient', () => ({
   getCachedGameRoom: vi.fn().mockResolvedValue(null),
   cacheGameRoom: vi.fn().mockResolvedValue(undefined),
   deleteCachedGameRoom: vi.fn().mockResolvedValue(undefined),
+  initRedis: vi.fn().mockResolvedValue(undefined),
 }));
 
 // Mock crypto: make randomUUID() return a predictable value so we can
@@ -246,8 +247,13 @@ describe('createGameRoom', () => {
   it('should send a PutCommand to DynamoDB', async () => {
     await createGameRoom('room-1', 'user-1', 'Alice', 'landmarks');
 
-    // docClient.send should have been called exactly once to write the room
     expect(mockSend).toHaveBeenCalledTimes(1);
+  });
+
+  it('should pre-populate the Redis cache after creating the room', async () => {
+    const result = await createGameRoom('room-1', 'user-1', 'Alice', 'landmarks');
+
+    expect(mockSetCache).toHaveBeenCalledWith('room-1', result.room);
   });
 
   it('should return success: false when DynamoDB throws an error', async () => {

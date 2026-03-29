@@ -347,6 +347,10 @@ const io = new Server(httpServer, {
   },
 });
 
+// In-memory map: socketId → roomId.  Populated on create/join/rejoin so the
+// disconnect handler can look up the room without scanning DynamoDB.
+const socketRoomMap = new Map<string, string>();
+
 const images: ImageMetadata[] = imagesData as ImageMetadata[];
 
 // Helper function to get the two images (one for each player) - fallback only
@@ -432,6 +436,7 @@ io.on("connection", (socket: Socket) => {
     await updatePlayerSocketId(roomId, 0, socket.id);
     
     socket.join(roomId);
+    socketRoomMap.set(socket.id, roomId);
     
     console.log(`Room created in DynamoDB: ${roomId} by ${username || 'Guest'} (${socket.id}) with category: ${category}, mode: ${gameMode}, maxPlayers: ${maxPlayers}`);
     callback(roomId);
@@ -466,6 +471,7 @@ io.on("connection", (socket: Socket) => {
     await updatePlayerSocketId(roomId, 0, socket.id);
     
     socket.join(roomId);
+    socketRoomMap.set(socket.id, roomId);
     
     const categoryInfo = customQuery ? `custom: "${customQuery}"` : selectedCategory;
     console.log(`Room created in DynamoDB with ID: ${roomId} by ${username || 'Guest'} (${socket.id}) with category: ${categoryInfo}, mode: ${gameMode}, maxPlayers: ${maxPlayers}`);
@@ -503,6 +509,7 @@ io.on("connection", (socket: Socket) => {
 
     const newPlayerIndex = addPlayerResult.room.players.length - 1;
     socket.join(roomId);
+    socketRoomMap.set(socket.id, roomId);
 
     // Notify everyone of the new player joining
     io.to(roomId).emit("player-joined", {
@@ -1491,9 +1498,9 @@ io.on("connection", (socket: Socket) => {
 
       room.players[playerIndex].socketId = socket.id;
       await updateGameRoom(room);
-      await updatePlayerSocketId(data.roomId, playerIndex, socket.id);
 
       socket.join(data.roomId);
+      socketRoomMap.set(socket.id, data.roomId);
 
       socket.to(data.roomId).emit("player-reconnected", {
         playerIndex,
@@ -1513,16 +1520,19 @@ io.on("connection", (socket: Socket) => {
   socket.on("disconnect", async () => {
     console.log(`User disconnected: ${socket.id}`);
 
-    const activeRooms = await getActiveGameRooms();
-    
-    for (const room of activeRooms) {
-      const playerIndex = room.players.findIndex((p: Player) => p.socketId === socket.id);
-      
-      if (playerIndex !== -1) {
-        io.to(room.roomId).emit("player-disconnected", {
-          playerIndex,
-          message: "Opponent disconnected — waiting for them to rejoin",
-        });
+    const roomId = socketRoomMap.get(socket.id);
+    socketRoomMap.delete(socket.id);
+
+    if (roomId) {
+      const room = await getGameRoom(roomId);
+      if (room) {
+        const playerIndex = room.players.findIndex((p: Player) => p.socketId === socket.id);
+        if (playerIndex !== -1) {
+          io.to(roomId).emit("player-disconnected", {
+            playerIndex,
+            message: "Opponent disconnected — waiting for them to rejoin",
+          });
+        }
       }
     }
   });
@@ -1530,7 +1540,11 @@ io.on("connection", (socket: Socket) => {
 
 const PORT = process.env.PORT || 3001;
 
-httpServer.listen(PORT, () => {
+// Connect to Redis eagerly so the first player action doesn't pay connection latency
+import { initRedis } from "../lib/redisClient";
+
+httpServer.listen(PORT, async () => {
   console.log(`[GridGuesser] Socket.io server running on port ${PORT}`);
+  await initRedis();
 });
 
