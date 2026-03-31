@@ -9,6 +9,8 @@ export interface PowerUp {
   name: string;
   cost: number;
   description: string;
+  /** Shown when the (i) button is toggled — replaces the old separate instruction panels */
+  detailHint: string;
   icon: string;
   activation: 'instant' | 'selectTile' | 'selectLine';
   needsTarget?: boolean; // in royale, requires choosing an opponent
@@ -18,6 +20,8 @@ interface PowerUpsSidebarProps {
   myPoints: number;
   opponentPoints: number;
   isMyTurn: boolean;
+  /** Tile-select modes (peek, reveal2x2, revealLine) — owned by parent so highlight clears after use */
+  selectedPowerUp: string | null;
   onUsePowerUp: (powerUpId: string, tileIndex?: number, lineType?: 'row' | 'col', lineIndex?: number, targetPlayerIndex?: number) => void;
   disabled?: boolean;
   isFrozen?: boolean;
@@ -35,6 +39,7 @@ const powerUps: PowerUp[] = [
     name: 'Peek',
     cost: 4,
     description: 'Glimpse a 3x3 area for 5 seconds',
+    detailHint: 'Click a tile on the opponent\'s grid to peek at a 3×3 area for 5 seconds.',
     icon: 'peek',
     activation: 'selectTile',
   },
@@ -43,6 +48,7 @@ const powerUps: PowerUp[] = [
     name: 'Skip Turn',
     cost: 5,
     description: 'Target skips their next reveal phase',
+    detailHint: 'Choose a player. They skip their next reveal phase.',
     icon: 'clock',
     activation: 'instant',
     needsTarget: true,
@@ -52,6 +58,7 @@ const powerUps: PowerUp[] = [
     name: 'Reveal Row/Col',
     cost: 6,
     description: 'Reveal an entire row or column',
+    detailHint: 'Hover over the grid to preview, then click to reveal. Press R for row mode or C for column mode.',
     icon: 'revealLine',
     activation: 'selectTile',
   },
@@ -60,6 +67,7 @@ const powerUps: PowerUp[] = [
     name: 'Freeze',
     cost: 6,
     description: 'Block a player from using power-ups next turn',
+    detailHint: 'Choose a player. They cannot use power-ups on their next turn.',
     icon: 'freeze',
     activation: 'instant',
     needsTarget: true,
@@ -69,6 +77,7 @@ const powerUps: PowerUp[] = [
     name: 'Fog of War',
     cost: 8,
     description: 'Re-hide 4 tiles on your image',
+    detailHint: 'Four of your revealed tiles are hidden again for your opponent to re-reveal.',
     icon: 'fog',
     activation: 'instant',
   },
@@ -77,6 +86,7 @@ const powerUps: PowerUp[] = [
     name: 'Reveal 2x2',
     cost: 8,
     description: 'Reveal a 2x2 area on an opponent\'s grid',
+    detailHint: 'Click a tile on the opponent\'s grid to reveal a 2×2 block of tiles.',
     icon: 'grid2x2',
     activation: 'selectTile',
   },
@@ -85,6 +95,7 @@ const powerUps: PowerUp[] = [
     name: 'Nuke',
     cost: 30,
     description: 'Reveal a player\'s entire image (no more guess points)',
+    detailHint: 'Choose a player. Their full image is revealed; they can no longer earn guess points from that image.',
     icon: 'nuke',
     activation: 'instant',
     needsTarget: true,
@@ -95,6 +106,7 @@ export default function PowerUpsSidebar({
   myPoints,
   opponentPoints,
   isMyTurn,
+  selectedPowerUp,
   onUsePowerUp,
   disabled = false,
   isFrozen = false,
@@ -103,8 +115,9 @@ export default function PowerUpsSidebar({
   myPlayerIndex,
   activePlayers = [],
 }: PowerUpsSidebarProps) {
-  const [selectedPowerUp, setSelectedPowerUp] = useState<string | null>(null);
   const [selectingTarget, setSelectingTarget] = useState<string | null>(null);
+  /** Which power-up card has its (i) details expanded */
+  const [infoOpenId, setInfoOpenId] = useState<string | null>(null);
   const [page, setPage] = useState(0);
 
   const isRoyale = gameMode === 'royale';
@@ -125,12 +138,14 @@ export default function PowerUpsSidebar({
     }
 
     if (powerUp.activation === 'selectTile') {
-      setSelectedPowerUp(powerUp.id);
       onUsePowerUp(powerUp.id);
     } else {
       onUsePowerUp(powerUp.id);
-      setSelectedPowerUp(null);
     }
+  };
+
+  const togglePowerUpInfo = (powerUpId: string) => {
+    setInfoOpenId((prev) => (prev === powerUpId ? null : powerUpId));
   };
 
   const handleTargetSelected = (targetPlayerIndex: number) => {
@@ -141,7 +156,6 @@ export default function PowerUpsSidebar({
   };
 
   const handleCancel = () => {
-    setSelectedPowerUp(null);
     setSelectingTarget(null);
     onUsePowerUp('cancel');
   };
@@ -216,80 +230,91 @@ export default function PowerUpsSidebar({
         </div>
       )}
 
-      {/* Instructions for active power-ups */}
-      {selectedPowerUp === 'reveal2x2' && (
-        <div className="bg-purple-100 dark:bg-purple-900 border-2 border-purple-400 dark:border-purple-600 rounded-lg p-4 animate-fade-in">
-          <p className="text-sm text-purple-900 dark:text-purple-100 font-bold mb-1">2x2 Reveal Mode</p>
-          <p className="text-xs text-purple-800 dark:text-purple-200 mb-2">Click a tile on opponent&apos;s grid to reveal a 2x2 area.</p>
-          <button onClick={handleCancel} className="text-xs text-purple-700 dark:text-purple-300 bg-purple-200 dark:bg-purple-800 px-2 py-1 rounded hover:bg-purple-300 dark:hover:bg-purple-700 transition-colors">Cancel</button>
-        </div>
-      )}
-
-      {selectedPowerUp === 'peek' && (
-        <div className="bg-amber-100 dark:bg-amber-900 border-2 border-amber-400 dark:border-amber-600 rounded-lg p-4 animate-fade-in">
-          <p className="text-sm text-amber-900 dark:text-amber-100 font-bold mb-1">Peek Mode</p>
-          <p className="text-xs text-amber-800 dark:text-amber-200 mb-2">Click a tile on opponent&apos;s grid to peek at a 3x3 area for 5 seconds.</p>
-          <button onClick={handleCancel} className="text-xs text-amber-700 dark:text-amber-300 bg-amber-200 dark:bg-amber-800 px-2 py-1 rounded hover:bg-amber-300 dark:hover:bg-amber-700 transition-colors">Cancel</button>
-        </div>
-      )}
-
-      {selectedPowerUp === 'revealLine' && (
-        <div className="bg-teal-100 dark:bg-teal-900 border-2 border-teal-400 dark:border-teal-600 rounded-lg p-4 animate-fade-in">
-          <p className="text-sm text-teal-900 dark:text-teal-100 font-bold mb-1">Reveal Row/Col Mode</p>
-          <p className="text-xs text-teal-800 dark:text-teal-200 mb-1">Hover over the grid to preview. Click to reveal.</p>
-          <p className="text-xs text-teal-800 dark:text-teal-200 mb-2">
-            Press <kbd className="px-1.5 py-0.5 bg-teal-200 dark:bg-teal-800 rounded font-mono font-bold">R</kbd> for row, <kbd className="px-1.5 py-0.5 bg-teal-200 dark:bg-teal-800 rounded font-mono font-bold">C</kbd> for column.
-          </p>
-          <button onClick={handleCancel} className="text-xs text-teal-700 dark:text-teal-300 bg-teal-200 dark:bg-teal-800 px-2 py-1 rounded hover:bg-teal-300 dark:hover:bg-teal-700 transition-colors">Cancel</button>
-        </div>
-      )}
-
       {/* Power-Ups List (paginated) */}
       <div className="space-y-3">
         {visiblePowerUps.map((powerUp) => {
           const affordable = canAfford(powerUp.cost);
           const isSelected = selectedPowerUp === powerUp.id;
           const canUse = affordable && isMyTurn && !disabled && !isFrozen;
+          const isTileSelectActive = isSelected && powerUp.activation === 'selectTile';
 
           return (
-            <button
+            <div
               key={powerUp.id}
-              onClick={() => handlePowerUpClick(powerUp)}
-              disabled={!canUse}
               className={`
-                w-full p-4 rounded-lg border-2 transition-all duration-200
+                relative rounded-lg border-2 transition-all duration-200
                 ${canUse
-                  ? 'border-purple-500 bg-gradient-to-r from-purple-50 to-pink-50 dark:from-purple-900/30 dark:to-pink-900/30 hover:shadow-lg hover:scale-105 cursor-pointer'
-                  : 'border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-700 opacity-50 cursor-not-allowed'
+                  ? 'border-purple-500 bg-gradient-to-r from-purple-50 to-pink-50 dark:from-purple-900/30 dark:to-pink-900/30'
+                  : 'border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-700 opacity-50'
                 }
-                ${isSelected ? 'ring-4 ring-purple-400 scale-105' : ''}
+                ${isSelected && canUse ? 'ring-4 ring-purple-400 scale-[1.02]' : ''}
               `}
             >
-              <div className="flex items-start gap-3">
-                <div className={`p-2 rounded-lg ${canUse ? 'bg-purple-500' : 'bg-gray-400'}`}>
-                  <Icon name={powerUp.icon} size={24} className="text-white" />
-                </div>
-                <div className="flex-1 text-left">
-                  <div className="flex items-center justify-between mb-1">
-                    <h3 className="font-bold text-gray-800 dark:text-gray-100">
-                      {powerUp.name}
-                    </h3>
-                    <span className={`
-                      px-2 py-1 rounded-full text-xs font-bold
-                      ${canUse
-                        ? 'bg-purple-500 text-white' 
-                        : 'bg-gray-400 text-gray-700 dark:bg-gray-600 dark:text-gray-300'
-                      }
-                    `}>
-                      {powerUp.cost} pts
-                    </span>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  togglePowerUpInfo(powerUp.id);
+                }}
+                className="absolute top-2 right-2 z-10 flex h-7 w-7 items-center justify-center rounded-full border-2 border-gray-400 bg-white text-xs font-bold text-gray-600 shadow-sm transition-colors hover:border-purple-500 hover:bg-purple-50 hover:text-purple-700 dark:border-gray-500 dark:bg-gray-800 dark:text-gray-300 dark:hover:border-purple-400 dark:hover:bg-purple-900/40 dark:hover:text-purple-200"
+                aria-expanded={infoOpenId === powerUp.id}
+                aria-label={`${infoOpenId === powerUp.id ? 'Hide' : 'Show'} details for ${powerUp.name}`}
+              >
+                i
+              </button>
+              <button
+                type="button"
+                onClick={() => handlePowerUpClick(powerUp)}
+                disabled={!canUse}
+                className={`
+                  w-full p-4 pr-12 text-left rounded-lg transition-all duration-200
+                  ${canUse ? 'hover:shadow-md cursor-pointer' : 'cursor-not-allowed'}
+                `}
+              >
+                <div className="flex items-start gap-3">
+                  <div className={`p-2 rounded-lg shrink-0 ${canUse ? 'bg-purple-500' : 'bg-gray-400'}`}>
+                    <Icon name={powerUp.icon} size={24} className="text-white" />
                   </div>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">
-                    {powerUp.description}
-                  </p>
+                  <div className="flex-1 min-w-0 text-left pr-1">
+                    <div className="flex items-start justify-between gap-2 mb-1 pr-1">
+                      <h3 className="font-bold text-gray-800 dark:text-gray-100">
+                        {powerUp.name}
+                      </h3>
+                      <span
+                        className={`
+                          shrink-0 px-2 py-1 rounded-full text-xs font-bold tabular-nums
+                          ${canUse
+                            ? 'bg-purple-500 text-white'
+                            : 'bg-gray-400 text-gray-700 dark:bg-gray-600 dark:text-gray-300'
+                          }
+                        `}
+                      >
+                        {powerUp.cost} pts
+                      </span>
+                    </div>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                      {powerUp.description}
+                    </p>
+                  </div>
                 </div>
-              </div>
-            </button>
+              </button>
+              {isTileSelectActive && (
+                <div className="px-4 pb-3 pt-0">
+                  <button
+                    type="button"
+                    onClick={handleCancel}
+                    className="text-xs font-semibold text-purple-700 underline underline-offset-2 hover:text-purple-900 dark:text-purple-300 dark:hover:text-purple-100"
+                  >
+                    Cancel selection
+                  </button>
+                </div>
+              )}
+              {infoOpenId === powerUp.id && (
+                <div className="border-t border-purple-200/80 bg-white/60 px-4 py-3 dark:border-purple-800/50 dark:bg-gray-900/40">
+                  <p className="text-xs leading-relaxed text-gray-700 dark:text-gray-300">{powerUp.detailHint}</p>
+                </div>
+              )}
+            </div>
           );
         })}
       </div>

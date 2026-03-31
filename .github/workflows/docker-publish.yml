@@ -1,0 +1,103 @@
+# Build and push GridGuesser backend + frontend images to GitHub Container Registry.
+# Configure repository secrets (Settings → Secrets and variables → Actions):
+#   NEXT_PUBLIC_APP_URL      — public frontend origin, e.g. https://app.example.com
+#   NEXT_PUBLIC_SOCKET_URL   — public backend origin for Socket.IO, e.g. https://api.example.com
+#   NEXT_PUBLIC_API_URL      — public API base, e.g. https://api.example.com/api
+#
+# Images: ghcr.io/<lowercase-owner>/gridguesser-backend:<tag> and gridguesser-frontend:<tag>
+
+name: Publish Docker images
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: docker-publish-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Require NEXT_PUBLIC_* secrets for frontend image
+        env:
+          A: ${{ secrets.NEXT_PUBLIC_APP_URL }}
+          S: ${{ secrets.NEXT_PUBLIC_SOCKET_URL }}
+          P: ${{ secrets.NEXT_PUBLIC_API_URL }}
+        run: |
+          missing=0
+          [ -z "$A" ] && echo "::error::Missing secret NEXT_PUBLIC_APP_URL (public frontend URL, e.g. https://app.example.com)" && missing=1
+          [ -z "$S" ] && echo "::error::Missing secret NEXT_PUBLIC_SOCKET_URL (public backend URL for Socket.IO)" && missing=1
+          [ -z "$P" ] && echo "::error::Missing secret NEXT_PUBLIC_API_URL (e.g. https://api.example.com/api)" && missing=1
+          exit $missing
+
+      - name: Lowercase owner for GHCR
+        run: echo "IMAGE_OWNER=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker metadata (backend)
+        id: meta-backend
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ env.IMAGE_OWNER }}/gridguesser-backend
+          tags: |
+            type=sha,prefix=
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push backend
+        uses: docker/build-push-action@v6
+        with:
+          context: ./GridGuesser
+          file: ./GridGuesser/Dockerfile
+          push: true
+          tags: ${{ steps.meta-backend.outputs.tags }}
+          labels: ${{ steps.meta-backend.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Docker metadata (frontend)
+        id: meta-frontend
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ env.IMAGE_OWNER }}/gridguesser-frontend
+          tags: |
+            type=sha,prefix=
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push frontend
+        uses: docker/build-push-action@v6
+        with:
+          context: ./GridGuesser
+          file: ./GridGuesser/Dockerfile.frontend
+          push: true
+          tags: ${{ steps.meta-frontend.outputs.tags }}
+          labels: ${{ steps.meta-frontend.outputs.labels }}
+          build-args: |
+            NEXT_PUBLIC_APP_URL=${{ secrets.NEXT_PUBLIC_APP_URL }}
+            NEXT_PUBLIC_SOCKET_URL=${{ secrets.NEXT_PUBLIC_SOCKET_URL }}
+            NEXT_PUBLIC_API_URL=${{ secrets.NEXT_PUBLIC_API_URL }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

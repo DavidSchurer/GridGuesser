@@ -1172,6 +1172,7 @@ export default function GameRoomPage() {
                     .map((p) => gameRoom.points[p.playerIndex] || 0)
                 )}
                 isMyTurn={isPlayerActive && (royalePhase === 'reveal' || royalePhase === 'guess')}
+                selectedPowerUp={selectedPowerUp}
                 onUsePowerUp={(powerUpId, tileIndex, lineType, lineIndex, targetPlayerIndex) => {
                   handleUsePowerUp(powerUpId, tileIndex, lineType, lineIndex, targetPlayerIndex);
                 }}
@@ -1474,6 +1475,7 @@ export default function GameRoomPage() {
               myPoints={myPoints}
               opponentPoints={opponentPoints}
               isMyTurn={isMyTurn}
+              selectedPowerUp={selectedPowerUp}
               onUsePowerUp={(powerUpId, tileIndex, lineType, lineIndex, targetPlayerIndex) => {
                 handleUsePowerUp(powerUpId, tileIndex, lineType, lineIndex, targetPlayerIndex);
               }}

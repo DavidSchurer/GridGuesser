@@ -1,0 +1,43 @@
+# =============================================================================
+#  GridGuesser — production Compose (pre-built images from GHCR)
+#
+#  Target: single host (VPS) or any environment that runs Docker Compose.
+#  CI pushes images via .github/workflows/docker-publish.yml to:
+#    ghcr.io/<owner>/gridguesser-backend:<tag>
+#    ghcr.io/<owner>/gridguesser-frontend:<tag>
+#
+#  Before first run:
+#    1. cp compose.env.example compose.env  (GHCR_OWNER = lowercase GitHub user/org)
+#    2. cp backend.env.example backend.env  (AWS, JWT, NEXT_PUBLIC_APP_URL for CORS, etc.)
+#    3. docker login ghcr.io  (read:packages scope for private images)
+#    4. docker compose --env-file compose.env -f docker-compose.prod.yml pull
+#    5. docker compose --env-file compose.env -f docker-compose.prod.yml up -d
+#
+#  Tiles: named volume `tiles_data` keeps generated tiles across backend restarts.
+#
+#  Scaling: run one backend replica unless you add a Socket.IO Redis adapter —
+#  rooms/sockets are process-local; Redis in this app is used for game-room cache only.
+# =============================================================================
+
+services:
+  backend:
+    image: ghcr.io/${GHCR_OWNER}/gridguesser-backend:${IMAGE_TAG:-latest}
+    ports:
+      - "${BACKEND_HOST_PORT:-3001}:3001"
+    env_file:
+      - backend.env
+    volumes:
+      - tiles_data:/app/public/tiles
+    restart: unless-stopped
+
+  # Next.js bundle already has NEXT_PUBLIC_* from the image build; no env_file needed here.
+  frontend:
+    image: ghcr.io/${GHCR_OWNER}/gridguesser-frontend:${IMAGE_TAG:-latest}
+    ports:
+      - "${FRONTEND_HOST_PORT:-3000}:3000"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  tiles_data:
