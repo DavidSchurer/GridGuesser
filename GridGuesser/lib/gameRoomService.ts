@@ -6,12 +6,45 @@ if (typeof __dirname !== 'undefined') {
 }
 
 import { docClient, TABLES, PutCommand, GetCommand, UpdateCommand, QueryCommand, ScanCommand } from "./dynamodb";
-import { GameRoom, GameMode, DynamicImageMetadata } from "./types";
+import { GameRoom, GameMode, DynamicImageMetadata, AiDifficulty } from "./types";
 import { randomUUID } from "crypto";
 import { cacheGameRoom, getCachedGameRoom, deleteCachedGameRoom } from "./redisClient";
 
 // DynamoDB table for game rooms
 const GAME_ROOMS_TABLE = process.env.DYNAMODB_GAME_ROOMS_TABLE || "GridGuesser-GameRooms";
+
+// Alphabet for spectator codes — omits ambiguous chars (0/O, 1/I, etc.) so codes are easy to read/share
+const SPECTATOR_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+
+/** Generate a 6-char uppercase alphanumeric spectator code. */
+export function generateSpectatorCode(): string {
+  let code = "";
+  for (let i = 0; i < 6; i++) {
+    code += SPECTATOR_CODE_ALPHABET[Math.floor(Math.random() * SPECTATOR_CODE_ALPHABET.length)];
+  }
+  return code;
+}
+
+/**
+ * Find an active game room by its spectator code. Uses a full table scan
+ * filtered by spectatorCode. This is fine for MVP volume; a GSI can be added later.
+ */
+export async function getRoomBySpectatorCode(spectatorCode: string): Promise<GameRoom | null> {
+  try {
+    const command = new ScanCommand({
+      TableName: GAME_ROOMS_TABLE,
+      FilterExpression: "spectatorCode = :code",
+      ExpressionAttributeValues: { ":code": spectatorCode.toUpperCase() },
+      Limit: 1,
+    });
+    const response = await docClient.send(command);
+    const room = (response.Items?.[0] as GameRoom) || null;
+    return room;
+  } catch (error) {
+    console.error("Error looking up room by spectator code:", error);
+    return null;
+  }
+}
 
 // Create a new game room in DynamoDB
 export async function createGameRoom(
@@ -48,6 +81,7 @@ export async function createGameRoom(
       imageMetadata: Array(n).fill(null),
       revealedHints: Array.from({ length: n }, () => []),
       skipTurnActive: false,
+      spectatorCode: generateSpectatorCode(),
       gameMode,
       maxPlayers: n,
       ...(gameMode === 'royale' ? {
@@ -58,6 +92,9 @@ export async function createGameRoom(
         revealedThisPhase: {},
         guessedThisPhase: {},
         phaseRound: 0,
+        royaleLetterHints: Array.from({ length: n }, () =>
+          Array.from({ length: n }, () => [] as number[])
+        ),
       } : {}),
     };
 
@@ -186,6 +223,48 @@ export async function addPlayerToRoom(
   }
 }
 
+/** Second seat for normal-mode vs-AI (synthetic player, no socket). */
+export async function addAiPlayerToRoom(
+  roomId: string,
+  aiDifficulty: AiDifficulty
+): Promise<{ success: boolean; room?: GameRoom; error?: string }> {
+  try {
+    const room = await getGameRoom(roomId);
+    if (!room) {
+      return { success: false, error: "Room not found" };
+    }
+    if (room.gameMode !== "normal") {
+      return { success: false, error: "AI opponent is only available in normal mode" };
+    }
+    if (room.vsAi) {
+      return { success: false, error: "Room already has an AI opponent" };
+    }
+    if (room.players.length >= room.maxPlayers) {
+      return { success: false, error: "Room is full" };
+    }
+    if (room.gameState !== "waiting") {
+      return { success: false, error: "Game already in progress" };
+    }
+
+    const newIndex = room.players.length;
+    room.players.push({
+      id: `ai:gridbot-${roomId}`,
+      socketId: "",
+      playerIndex: newIndex,
+      name: "GridBot",
+      isAi: true,
+    });
+    room.vsAi = true;
+    room.aiDifficulty = aiDifficulty;
+
+    await updateGameRoom(room);
+    return { success: true, room };
+  } catch (error) {
+    console.error("Error adding AI player:", error);
+    return { success: false, error: "Failed to add AI player" };
+  }
+}
+
 // Update game state and images (supports N images for royale)
 export async function updateGameImages(
   roomId: string,
@@ -222,7 +301,13 @@ export async function updateGameImages(
 
     if (room.gameMode === 'royale') {
       room.activePlayers = room.players.map(p => p.playerIndex);
+      const n = room.maxPlayers;
+      room.royaleLetterHints = Array.from({ length: n }, () =>
+        Array.from({ length: n }, () => [] as number[])
+      );
     }
+
+    room.revealedHints = Array.from({ length: room.maxPlayers }, () => []);
 
     const hashes = tileResults.map(r => r.imageHash).join(', ');
     const names = room.imageNames.map(n => `"${n}"`).join(' and ');

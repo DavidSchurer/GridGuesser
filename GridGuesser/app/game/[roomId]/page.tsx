@@ -5,11 +5,12 @@ import { useParams, useRouter } from "next/navigation";
 import { connectSocket, disconnectSocket } from "@/lib/socket";
 import { useGameStore } from "@/lib/gameStore";
 import { useAuth } from "@/lib/authContext";
-import { GameRoom, GameMode, RoyalePhase, RoyalePlacement } from "@/lib/types";
+import { GameRoom, GameMode, RoyalePhase, RoyalePlacement, AiDifficulty } from "@/lib/types";
 import GameGrid from "@/components/GameGrid";
 import GameStatus from "@/components/GameStatus";
 import GuessInput from "@/components/GuessInput";
 import RoomCodeDisplay from "@/components/RoomCodeDisplay";
+import InviteToWatchModal from "@/components/InviteToWatchModal";
 import PowerUpsSidebar from "@/components/PowerUpsSidebar";
 import PlayerInfo from "@/components/PlayerInfo";
 import CategorySelector from "@/components/CategorySelector";
@@ -65,6 +66,10 @@ export default function GameRoomPage() {
   // Invite link join flow: prompt for name when arriving without one
   const [showJoinPrompt, setShowJoinPrompt] = useState(false);
   const [joinName, setJoinName] = useState("");
+
+  // Spectator invite
+  const [showInviteWatchModal, setShowInviteWatchModal] = useState(false);
+  const [spectatorCount, setSpectatorCount] = useState(0);
 
   // Royale-specific state
   const [royalePhase, setRoyalePhase] = useState<RoyalePhase>('idle');
@@ -132,6 +137,8 @@ export default function GameRoomPage() {
     const isRejoin = searchParams.get('rejoin') === '1';
     const gameModeParam = (searchParams.get('gameMode') || 'normal') as GameMode;
     const maxPlayersParam = parseInt(searchParams.get('maxPlayers') || '2', 10);
+    const vsAiParam = searchParams.get('vsAi') === '1';
+    const aiDifficultyParam = (searchParams.get('aiDifficulty') || 'medium') as AiDifficulty;
 
     const savedGame = (() => { try { return JSON.parse(localStorage.getItem('gridguesser_active_game') || 'null'); } catch { return null; } })();
     const canTryRejoin = isRejoin && savedGame?.roomId === roomId && savedGame?.playerId;
@@ -150,11 +157,15 @@ export default function GameRoomPage() {
           ...(customQuery && { customQuery }),
           gameMode: gameModeParam,
           maxPlayers: gameModeParam === 'royale' ? maxPlayersParam : 2,
+          ...(vsAiParam && gameModeParam === 'normal' ? { vsAi: true, aiDifficulty: aiDifficultyParam } : {}),
         };
         
         socketInstance.emit("create-room-with-id", roomData, (success: boolean, errorMsg?: string) => {
           if (success) {
             setPlayerIndex(0);
+            if (vsAiParam && gameModeParam === 'normal') {
+              setOpponentConnected(true);
+            }
             console.log(`✅ Room created with category: ${selectedCategory}${customQuery ? ` (custom: "${customQuery}")` : ''}`);
             socketInstance.emit("get-game-state", roomId, (newRoom: GameRoom | null) => {
               if (newRoom) {
@@ -210,9 +221,16 @@ export default function GameRoomPage() {
     });
 
     // Listen for game start
-    socketInstance.on("game-start", (data: { roomId: string; players: any[]; currentTurn: number; gameMode?: GameMode; maxPlayers?: number }) => {
+    socketInstance.on("game-start", (data: { roomId: string; players: any[]; currentTurn: number; gameMode?: GameMode; maxPlayers?: number; vsAi?: boolean }) => {
       setOpponentConnected(true);
-      showNotification(data.gameMode === 'royale' ? "All players joined! Game starting..." : "Opponent joined! Game starting...");
+      const vsAi = !!data.vsAi;
+      showNotification(
+        data.gameMode === 'royale'
+          ? "All players joined! Game starting..."
+          : vsAi
+            ? "Playing vs GridBot. Game on!"
+            : "Opponent joined! Game starting..."
+      );
       
       const currentRoom = useGameStore.getState().gameRoom;
       const n = data.maxPlayers || data.players.length;
@@ -537,6 +555,7 @@ export default function GameRoomPage() {
       // Show rematch modal after 6 seconds so players can see both full images and answers
       setTimeout(() => {
         const latestRoom = useGameStore.getState().gameRoom;
+        if (latestRoom?.vsAi) return;
         if (latestRoom?.category) {
           setRematchCategory(latestRoom.category);
           setRematchCustomQuery(latestRoom.customQuery || '');
@@ -611,33 +630,66 @@ export default function GameRoomPage() {
     });
 
     // Listen for hint reveals
-    socketInstance.on("hint-revealed", (data: { playerIndex: number; charIndex: number; char: string; revealedHints: [number[], number[]]; points: [number, number] }) => {
-      const currentPlayerIndex = useGameStore.getState().playerIndex;
-      const currentRoom = useGameStore.getState().gameRoom;
-      if (currentRoom) {
-        // Update maskedImageNames locally for the player who bought the hint
-        const updatedMasked = [...(currentRoom.maskedImageNames || ["", ""])] as [string, string];
-        if (data.playerIndex === currentPlayerIndex) {
-          // This hint was for us – update our masked name
-          const chars = updatedMasked[data.playerIndex].split("");
-          if (data.charIndex < chars.length) {
-            chars[data.charIndex] = data.char;
-            updatedMasked[data.playerIndex] = chars.join("");
+    socketInstance.on(
+      "hint-revealed",
+      (data: {
+        playerIndex: number;
+        targetPlayerIndex: number;
+        charIndex: number;
+        char: string;
+        revealedHints: number[][];
+        royaleLetterHints?: number[][][];
+        points: number[];
+      }) => {
+        const currentPlayerIndex = useGameStore.getState().playerIndex;
+        const currentRoom = useGameStore.getState().gameRoom;
+        if (currentRoom) {
+          const updatedMasked = [...(currentRoom.maskedImageNames || [])];
+          if (data.playerIndex === currentPlayerIndex) {
+            if (currentRoom.gameMode === "royale") {
+              const raw = updatedMasked[data.playerIndex];
+              if (raw) {
+                try {
+                  const arr = JSON.parse(raw) as { playerIndex: number; masked: string }[];
+                  const entry = arr.find((e) => e.playerIndex === data.targetPlayerIndex);
+                  if (entry) {
+                    const chars = entry.masked.split("");
+                    if (data.charIndex < chars.length) {
+                      chars[data.charIndex] = data.char;
+                    }
+                    entry.masked = chars.join("");
+                  }
+                  updatedMasked[data.playerIndex] = JSON.stringify(arr);
+                } catch {
+                  /* ignore */
+                }
+              }
+            } else {
+              const row = updatedMasked[data.playerIndex] || "";
+              const chars = row.split("");
+              if (data.charIndex < chars.length) {
+                chars[data.charIndex] = data.char;
+              }
+              updatedMasked[data.playerIndex] = chars.join("");
+            }
           }
+          setGameRoom({
+            ...currentRoom,
+            revealedHints: data.revealedHints,
+            ...(data.royaleLetterHints !== undefined
+              ? { royaleLetterHints: data.royaleLetterHints }
+              : {}),
+            maskedImageNames: updatedMasked,
+            points: data.points,
+          });
         }
-        setGameRoom({
-          ...currentRoom,
-          revealedHints: data.revealedHints,
-          maskedImageNames: updatedMasked,
-          points: data.points,
-        });
+        if (data.playerIndex === currentPlayerIndex) {
+          showNotification(`Hint: letter "${data.char.toUpperCase()}" revealed!`);
+        } else {
+          showNotification("Opponent used a hint!");
+        }
       }
-      if (data.playerIndex === currentPlayerIndex) {
-        showNotification(`Hint: letter "${data.char.toUpperCase()}" revealed!`);
-      } else {
-        showNotification("Opponent used a hint!");
-      }
-    });
+    );
 
     // Listen for rematch declined
     socketInstance.on("rematch-declined", () => {
@@ -660,6 +712,11 @@ export default function GameRoomPage() {
     socketInstance.on("player-reconnected", (data: { playerIndex: number; message: string }) => {
       setOpponentConnected(true);
       showNotification(data.message);
+    });
+
+    // Spectator count updates
+    socketInstance.on("spectator-count-changed", (data: { count: number }) => {
+      setSpectatorCount(data.count);
     });
 
     return () => {
@@ -744,14 +801,18 @@ export default function GameRoomPage() {
     });
   };
 
-  const handleUseHint = () => {
+  const handleUseHint = (targetPlayerIndex?: number) => {
     if (!socket) return;
 
-    socket.emit("use-hint", { roomId }, (success: boolean, errorMsg?: string) => {
-      if (!success) {
-        showNotification(errorMsg || "Failed to use hint");
+    socket.emit(
+      "use-hint",
+      { roomId, ...(targetPlayerIndex !== undefined ? { targetPlayerIndex } : {}) },
+      (success: boolean, errorMsg?: string) => {
+        if (!success) {
+          showNotification(errorMsg || "Failed to use hint");
+        }
       }
-    });
+    );
   };
 
   const handleSubmitGuess = (guess: string) => {
@@ -993,25 +1054,60 @@ export default function GameRoomPage() {
   const royalePlacedPlayers = gameRoom.placements || [];
   const isPlayerActive = isRoyale ? royaleActivePlayers.includes(playerIndex) : true;
 
+  /** Masked title line for another player’s image (royale JSON from server) */
+  const getRoyaleMaskedLineForTarget = (targetPlayerIdx: number): string | null => {
+    if (!isRoyale || !gameRoom.maskedImageNames) return null;
+    const raw = gameRoom.maskedImageNames[playerIndex];
+    if (!raw) return null;
+    try {
+      const arr = JSON.parse(raw) as { playerIndex: number; masked: string }[];
+      return arr.find((e) => e.playerIndex === targetPlayerIdx)?.masked ?? null;
+    } catch {
+      return null;
+    }
+  };
+
   return (
     <main className={`min-h-screen ${isRoyale ? 'p-3 md:p-4' : 'p-4 md:p-8'}`}>
       <div className="max-w-[1800px] mx-auto">
         {/* Header */}
-        <div className={`flex justify-between items-center ${isRoyale ? 'mb-4' : 'mb-6'}`}>
+        <div className={`flex justify-between items-center ${isRoyale ? 'mb-4' : 'mb-6'} gap-2`}>
           <button
             onClick={() => { clearActiveGame(); router.push("/"); }}
-            className="px-4 py-2 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 rounded-lg transition-colors"
+            className="px-4 py-2 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 rounded-lg transition-colors shrink-0"
           >
             ← Leave Game
           </button>
-          <div className="text-center">
+          <div className="text-center flex-1 min-w-0">
             <h1 className={`font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-2 ${isRoyale ? 'text-xl md:text-2xl' : 'text-3xl'}`}>
               GridGuesser
             </h1>
             <RoomCodeDisplay roomCode={roomId} />
           </div>
-          <div className="w-24"></div>
+          <div className="flex flex-col items-end gap-1 shrink-0">
+            <button
+              onClick={() => setShowInviteWatchModal(true)}
+              className="px-3 py-2 bg-amber-100 dark:bg-amber-900/40 hover:bg-amber-200 dark:hover:bg-amber-800/50 text-amber-800 dark:text-amber-200 rounded-lg transition-colors text-sm font-semibold flex items-center gap-1.5 whitespace-nowrap"
+              title="Invite friends to watch"
+            >
+              <span aria-hidden>&#128065;</span>
+              <span className="hidden sm:inline">Invite to Watch</span>
+              <span className="sm:hidden">Watch</span>
+            </button>
+            {spectatorCount > 0 && (
+              <span className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1">
+                <span aria-hidden>&#128065;</span> {spectatorCount} watching
+              </span>
+            )}
+          </div>
         </div>
+
+        <InviteToWatchModal
+          isOpen={showInviteWatchModal}
+          onClose={() => setShowInviteWatchModal(false)}
+          spectatorCode={gameRoom.spectatorCode || null}
+          watcherCount={spectatorCount}
+        />
 
         {/* Word hints are now shown under the opponent's grid */}
 
@@ -1123,6 +1219,42 @@ export default function GameRoomPage() {
                         revealLineMode={selectedPowerUp === 'revealLine'}
                         lineDirection={lineDirection}
                       />
+
+                      {!isMe && gameRoom.gameState === 'playing' && gameRoom.maskedImageNames && playerIndex !== null && (
+                        <div className="mt-2 w-full max-w-[min(100%,420px)] px-0.5">
+                          <div className="bg-gray-100 dark:bg-gray-700/50 rounded-lg px-3 py-2 flex items-center justify-between gap-2">
+                            <div className="flex-1 min-w-0">
+                              <p className="text-[10px] text-gray-500 dark:text-gray-400 mb-0.5">
+                                Guess {p.name}&apos;s image
+                              </p>
+                              <div className="font-mono text-base sm:text-lg tracking-[0.2em] text-gray-800 dark:text-gray-100 overflow-x-auto whitespace-nowrap">
+                                {(getRoyaleMaskedLineForTarget(p.playerIndex) || '________').split('').map((ch, i) => (
+                                  <span
+                                    key={i}
+                                    className={
+                                      ch === '_'
+                                        ? 'text-gray-400 dark:text-gray-500'
+                                        : 'text-green-600 dark:text-green-400 font-bold'
+                                    }
+                                  >
+                                    {ch === ' ' ? '\u00A0\u00A0' : ch}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleUseHint(p.playerIndex)}
+                              disabled={myPoints < 3 || gameRoom.gameState !== 'playing'}
+                              className="shrink-0 px-2.5 py-1.5 bg-amber-500 hover:bg-amber-600 disabled:bg-gray-400 disabled:cursor-not-allowed text-white text-xs font-semibold rounded-lg transition-colors flex flex-col items-center leading-tight"
+                              title="Reveal a random letter in this image name (costs 3 points)"
+                            >
+                              <span>Hint</span>
+                              <span className="text-[10px] opacity-90">(3 pts)</span>
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -1171,6 +1303,7 @@ export default function GameRoomPage() {
                     .filter((p) => p.playerIndex !== playerIndex)
                     .map((p) => gameRoom.points[p.playerIndex] || 0)
                 )}
+                allPlayerPoints={gameRoom.points}
                 isMyTurn={isPlayerActive && (royalePhase === 'reveal' || royalePhase === 'guess')}
                 selectedPowerUp={selectedPowerUp}
                 onUsePowerUp={(powerUpId, tileIndex, lineType, lineIndex, targetPlayerIndex) => {
@@ -1201,6 +1334,8 @@ export default function GameRoomPage() {
             points={opponentPoints}
             isActive={!isMyTurn && gameRoom.gameState === 'playing'}
             isYou={false}
+            aiBadge={!!gameRoom.vsAi}
+            aiDifficultyLabel={gameRoom.aiDifficulty}
           />
         </div>
 
@@ -1270,7 +1405,7 @@ export default function GameRoomPage() {
                     </div>
                   </div>
                   <button
-                    onClick={handleUseHint}
+                    onClick={() => handleUseHint()}
                     disabled={myPoints < 3 || gameRoom.gameState !== 'playing'}
                     className="shrink-0 px-3 py-2 bg-amber-500 hover:bg-amber-600 disabled:bg-gray-400 disabled:cursor-not-allowed text-white text-sm font-semibold rounded-lg transition-colors flex items-center gap-1.5"
                     title="Reveal a random letter (costs 3 points)"
@@ -1497,6 +1632,8 @@ export default function GameRoomPage() {
             <RoyaleLeaderboard
               placements={royalePlacements}
               imageNames={royaleImageNames}
+              players={gameRoom.players}
+              imageHashes={gameRoom.imageHashes ?? []}
               myPlayerIndex={playerIndex}
               onClose={() => setShowRoyaleLeaderboard(false)}
             />

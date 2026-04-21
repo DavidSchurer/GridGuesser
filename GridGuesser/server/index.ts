@@ -8,8 +8,7 @@ import { createServer } from "http";
 import { Server, Socket } from "socket.io";
 import cors from "cors";
 import cookieParser from "cookie-parser";
-import { GameRoom, GameMode, Player, ImageMetadata, AuthenticatedPlayer, RoyalePlacement } from "../lib/types";
-import imagesData from "../lib/images.json";
+import { GameRoom, GameMode, Player, AuthenticatedPlayer, RoyalePlacement, AiDifficulty } from "../lib/types";
 import { verifyToken } from "../lib/jwt";
 import { isDynamoDBConfigured } from "../lib/dynamodb";
 import { 
@@ -25,6 +24,7 @@ import {
   getGameRoom,
   updateGameRoom,
   addPlayerToRoom,
+  addAiPlayerToRoom,
   updateGameImages,
   updatePlayerSocketId,
   cleanupOldGameRooms,
@@ -32,7 +32,17 @@ import {
   deleteGameRoom,
   storeUserCategory,
   getUserCategory,
+  getRoomBySpectatorCode,
 } from "../lib/gameRoomService";
+import { fuzzyMatchStrings } from "../lib/fuzzyMatch";
+import { fetchImagesAndStartGame } from "./startGame";
+import { scheduleAiTurn } from "./aiOpponent";
+import {
+  applyRevealTileNormal,
+  applySubmitGuessNormal,
+  applyUseHintNormal,
+  applyPowerUpNormal,
+} from "./normalModeActions";
 
 const app = express();
 const httpServer = createServer(app);
@@ -126,49 +136,6 @@ app.get("/api/categories", (req, res) => {
 // ─── Royale Phase Management ─────────────────────────────────────────────
 const ROYALE_PHASE_DURATION = 20_000; // 20 seconds per phase
 const royaleTimers = new Map<string, NodeJS.Timeout>();
-
-// Reusable fuzzy match logic extracted for royale use
-function normStr(s: string): string {
-  return s.toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
-}
-
-function levenshteinDist(a: string, b: string): number {
-  const m = a.length, n = b.length;
-  const dp: number[][] = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0));
-  for (let i = 0; i <= m; i++) dp[i][0] = i;
-  for (let j = 0; j <= n; j++) dp[0][j] = j;
-  for (let i = 1; i <= m; i++) {
-    for (let j = 1; j <= n; j++) {
-      dp[i][j] = a[i - 1] === b[j - 1]
-        ? dp[i - 1][j - 1]
-        : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
-    }
-  }
-  return dp[m][n];
-}
-
-function fuzzyMatchStrings(guess: string, answer: string): boolean {
-  const g = normStr(guess);
-  const a = normStr(answer);
-  if (g === a) return true;
-  if (a.includes(g) || g.includes(a)) return true;
-  const maxDist = Math.max(2, Math.floor(a.length * 0.3));
-  if (levenshteinDist(g, a) <= maxDist) return true;
-  const gWords = g.split(' ').filter(w => w.length > 1);
-  const aWords = a.split(' ').filter(w => w.length > 1);
-  let matched = 0;
-  for (const aw of aWords) {
-    for (const gw of gWords) {
-      if (aw === gw || aw.includes(gw) || gw.includes(aw) || levenshteinDist(gw, aw) <= 1) {
-        matched++;
-        break;
-      }
-    }
-  }
-  if (aWords.length <= 2 && matched >= 1) return true;
-  if (aWords.length > 2 && matched >= Math.ceil(aWords.length * 0.5)) return true;
-  return false;
-}
 
 async function startRoyalePhase(roomId: string, phase: 'reveal' | 'guess') {
   const room = await getGameRoom(roomId);
@@ -351,14 +318,117 @@ const io = new Server(httpServer, {
 // disconnect handler can look up the room without scanning DynamoDB.
 const socketRoomMap = new Map<string, string>();
 
-const images: ImageMetadata[] = imagesData as ImageMetadata[];
+// In-memory map: roomId → set of spectator socketIds currently watching.
+// Separate from socketRoomMap because spectators aren't players (not in room.players).
+const spectators = new Map<string, Set<string>>();
+// Reverse map: spectator socketId → roomId for cleanup on disconnect
+const spectatorRoomMap = new Map<string, string>();
 
-// Helper function to get the two images (one for each player) - fallback only
-function getTwoRandomImages(): [ImageMetadata, ImageMetadata] {
-  if (images.length >= 2) {
-    return [images[0], images[1]];
+function getSpectatorCount(roomId: string): number {
+  return spectators.get(roomId)?.size || 0;
+}
+
+function addSpectator(roomId: string, socketId: string): void {
+  let set = spectators.get(roomId);
+  if (!set) {
+    set = new Set();
+    spectators.set(roomId, set);
   }
-  return [images[0], images[0]];
+  set.add(socketId);
+  spectatorRoomMap.set(socketId, roomId);
+}
+
+function removeSpectator(socketId: string): { roomId: string; count: number } | null {
+  const roomId = spectatorRoomMap.get(socketId);
+  if (!roomId) return null;
+  spectatorRoomMap.delete(socketId);
+  const set = spectators.get(roomId);
+  if (set) {
+    set.delete(socketId);
+    if (set.size === 0) spectators.delete(roomId);
+  }
+  return { roomId, count: getSpectatorCount(roomId) };
+}
+
+/**
+ * Build a sanitized view of a room suitable for spectators.
+ * Strips raw image URLs and answer names, but includes masked names, both
+ * grids' revealed tiles, power-up usage state, and player loadouts.
+ */
+function buildSpectatorState(room: GameRoom) {
+  const numPlayers = room.players.length;
+  const hints = room.revealedHints || Array.from({ length: numPlayers }, () => []);
+
+  // For spectators we always include the masked names for every image in play,
+  // computed from the union of all hints revealed by any player so spectators
+  // see every letter that's been uncovered.
+  const allRevealedPerImage: Set<number>[] = Array.from(
+    { length: numPlayers },
+    () => new Set<number>()
+  );
+
+  if (room.gameMode === 'royale' && room.royaleLetterHints) {
+    for (let viewer = 0; viewer < numPlayers; viewer++) {
+      for (let target = 0; target < numPlayers; target++) {
+        (room.royaleLetterHints[viewer]?.[target] || []).forEach((i) =>
+          allRevealedPerImage[target].add(i)
+        );
+      }
+    }
+  } else {
+    // Normal mode: hints[p] are letters player p revealed for their OPPONENT's image (1 - p)
+    for (let p = 0; p < numPlayers; p++) {
+      const targetIdx = 1 - p;
+      if (targetIdx >= 0 && targetIdx < numPlayers) {
+        (hints[p] || []).forEach((i) => allRevealedPerImage[targetIdx].add(i));
+      }
+    }
+  }
+
+  const maskedImageNames = room.imageNames.map((name, imgIdx) => {
+    const revealed = allRevealedPerImage[imgIdx];
+    return Array.from(name || "")
+      .map((ch, i) => {
+        if (/\s/.test(ch)) return " ";
+        if (!/[a-zA-Z0-9]/.test(ch)) return ch;
+        return revealed.has(i) ? ch : "_";
+      })
+      .join("");
+  });
+
+  // Strip sensitive fields
+  return {
+    roomId: room.roomId,
+    gameState: room.gameState,
+    gameMode: room.gameMode,
+    maxPlayers: room.maxPlayers,
+    category: room.category,
+    customQuery: room.customQuery,
+    players: room.players.map((p) => ({
+      id: p.id,
+      playerIndex: p.playerIndex,
+      name: p.name,
+      isAi: !!p.isAi,
+    })),
+    points: room.points,
+    currentTurn: room.currentTurn,
+    revealedTiles: room.revealedTiles,
+    imageHashes: room.imageHashes,
+    maskedImageNames,
+    // Reveal full answer names once the game is over
+    imageNames: room.gameState === "finished" ? room.imageNames : undefined,
+    winner: room.winner,
+    nukeUsed: room.nukeUsed,
+    freezeActive: room.freezeActive,
+    skipTurnActive: room.skipTurnActive,
+    // Royale-specific fields (harmless if absent in normal mode)
+    royalePhase: room.royalePhase,
+    phaseEndTime: room.phaseEndTime,
+    phaseRound: room.phaseRound,
+    placements: room.placements,
+    activePlayers: room.activePlayers,
+    spectatorCount: getSpectatorCount(room.roomId),
+  };
 }
 
 // Helper function to generate room ID
@@ -443,10 +513,12 @@ io.on("connection", (socket: Socket) => {
   });
 
   // Create a room with a specific ID
-  socket.on("create-room-with-id", async (data: { roomId: string; playerName: string; category?: string; customQuery?: string; gameMode?: GameMode; maxPlayers?: number }, callback: (success: boolean, error?: string) => void) => {
+  socket.on("create-room-with-id", async (data: { roomId: string; playerName: string; category?: string; customQuery?: string; gameMode?: GameMode; maxPlayers?: number; vsAi?: boolean; aiDifficulty?: AiDifficulty }, callback: (success: boolean, error?: string) => void) => {
     const { roomId, playerName, category, customQuery } = data;
     const gameMode = data.gameMode || 'normal';
     const maxPlayers = gameMode === 'royale' ? (data.maxPlayers || 4) : 2;
+    const vsAi = !!data.vsAi && gameMode === 'normal';
+    const aiDifficulty: AiDifficulty = data.aiDifficulty || 'medium';
     
     const existingRoom = await getGameRoom(roomId);
     if (existingRoom) {
@@ -472,6 +544,30 @@ io.on("connection", (socket: Socket) => {
     
     socket.join(roomId);
     socketRoomMap.set(socket.id, roomId);
+
+    if (vsAi) {
+      const addAi = await addAiPlayerToRoom(roomId, aiDifficulty);
+      if (!addAi.success) {
+        await deleteGameRoom(roomId);
+        socket.leave(roomId);
+        socketRoomMap.delete(socket.id);
+        callback(false, addAi.error || "Failed to start AI game");
+        return;
+      }
+      await fetchImagesAndStartGame(roomId, io, {
+        onRoyaleGameStarted: (rid: string) => setTimeout(() => startRoyalePhase(rid, "reveal"), 2000),
+      });
+      const started = await getGameRoom(roomId);
+      if (started?.vsAi && started.gameState === "playing" && started.currentTurn === 1) {
+        scheduleAiTurn(roomId, io);
+      }
+      const categoryInfo = customQuery ? `custom: "${customQuery}"` : selectedCategory;
+      console.log(
+        `Room vs AI (${aiDifficulty}) created: ${roomId} by ${username || "Guest"} (${socket.id}) category: ${categoryInfo}`
+      );
+      callback(true);
+      return;
+    }
     
     const categoryInfo = customQuery ? `custom: "${customQuery}"` : selectedCategory;
     console.log(`Room created in DynamoDB with ID: ${roomId} by ${username || 'Guest'} (${socket.id}) with category: ${categoryInfo}, mode: ${gameMode}, maxPlayers: ${maxPlayers}`);
@@ -495,6 +591,11 @@ io.on("connection", (socket: Socket) => {
 
     if (room.gameState !== "waiting") {
       callback(false, undefined, "Game already in progress");
+      return;
+    }
+
+    if (room.vsAi) {
+      callback(false, undefined, "This room is a solo match vs AI");
       return;
     }
 
@@ -527,94 +628,15 @@ io.on("connection", (socket: Socket) => {
     }
 
     // Room is full - fetch images and start game
-    const category = addPlayerResult.room.category || 'landmarks';
-    const customQuery = addPlayerResult.room.customQuery;
-    const imageCount = addPlayerResult.room.maxPlayers;
-    
     try {
-      let fetchedImages: any[];
-      let updateResult: any;
-      let retryCount = 0;
-      const maxRetries = 3;
-      
-      while (retryCount < maxRetries) {
-        if (category === 'custom' && customQuery) {
-          if (imageCount > 2) {
-            fetchedImages = await fetchCustomImagesForRoyaleGame(customQuery, imageCount as 3 | 4);
-          } else {
-            const { fetchTwoImagesForCustomGame } = await import("../lib/googleImagesApi");
-            fetchedImages = await fetchTwoImagesForCustomGame(customQuery);
-          }
-          console.log(`Attempt ${retryCount + 1}: Fetching ${imageCount} images with custom query: "${customQuery}"`);
-        } else {
-          if (imageCount > 2) {
-            fetchedImages = await fetchImagesForRoyaleGame(category as CategoryKey, imageCount as 3 | 4);
-          } else {
-            fetchedImages = await fetchTwoImagesForGame(category as CategoryKey);
-          }
-        }
-      
-        if (fetchedImages.every((img: any) => img !== null)) {
-          updateResult = await updateGameImages(roomId, fetchedImages);
-          
-          if (updateResult.success) {
-            const queryInfo = customQuery ? `custom query "${customQuery}"` : `category "${category}"`;
-            const titles = fetchedImages.map((img: any) => `"${img.title}"`).join(', ');
-            console.log(`✅ Images successfully stored from ${queryInfo}: ${titles}`);
-            break;
-          } else {
-            console.log(`⚠️  Attempt ${retryCount + 1} failed: ${updateResult.error}. Retrying...`);
-            retryCount++;
-          }
-        } else {
-          console.log(`⚠️  Failed to fetch images on attempt ${retryCount + 1}`);
-          retryCount++;
-        }
-      }
-      
-      if (updateResult && updateResult.success) {
-        const updatedRoom = await getGameRoom(roomId);
-        if (updatedRoom && updatedRoom.gameState === "playing") {
-          io.to(roomId).emit("game-start", {
-            roomId,
-            players: updatedRoom.players,
-            currentTurn: updatedRoom.currentTurn,
-            imageHashes: updatedRoom.imageHashes,
-            category: updatedRoom.category,
-            gameMode: updatedRoom.gameMode,
-            maxPlayers: updatedRoom.maxPlayers,
-          });
-          console.log(`✅ Game started for room ${roomId} (mode: ${updatedRoom.gameMode}, players: ${updatedRoom.maxPlayers})`);
+      await fetchImagesAndStartGame(roomId, io, {
+        onRoyaleGameStarted: (rid: string) => setTimeout(() => startRoyalePhase(rid, "reveal"), 2000),
+      });
 
-          // For royale, kick off the first reveal phase after a short delay
-          if (updatedRoom.gameMode === 'royale') {
-            setTimeout(() => startRoyalePhase(roomId, 'reveal'), 2000);
-          }
-        }
-      } else {
-        console.log('⚠️  All retries failed. Using static images as fallback.');
-        const fallbackImages = getTwoRandomImages();
-        
-        addPlayerResult.room.images = [fallbackImages[0].id, fallbackImages[1].id];
-        addPlayerResult.room.imageNames = [fallbackImages[0].name, fallbackImages[1].name];
-        addPlayerResult.room.gameState = "playing";
-        await updateGameRoom(addPlayerResult.room);
-        
-        io.to(roomId).emit("game-start", {
-          roomId,
-          players: addPlayerResult.room.players,
-          currentTurn: addPlayerResult.room.currentTurn,
-          images: addPlayerResult.room.images,
-          category: addPlayerResult.room.category,
-          gameMode: addPlayerResult.room.gameMode,
-        });
-        console.log(`✅ Game started with fallback images for room ${roomId}`);
-      }
-
-      console.log(`Player joined room ${roomId}: ${username || 'Guest'} (${socket.id})`);
+      console.log(`Player joined room ${roomId}: ${username || "Guest"} (${socket.id})`);
       callback(true, newPlayerIndex as number);
     } catch (error) {
-      console.error('Error in join-room:', error);
+      console.error("Error in join-room:", error);
       callback(false, undefined, "Failed to start game");
     }
   });
@@ -630,20 +652,28 @@ io.on("connection", (socket: Socket) => {
 
     const numPlayers = room.players.length;
     const hints = room.revealedHints || Array.from({ length: numPlayers }, () => []);
+    const nPlayers = numPlayers;
+    const royaleHints =
+      room.gameMode === 'royale'
+        ? room.royaleLetterHints ||
+          Array.from({ length: nPlayers }, () =>
+            Array.from({ length: nPlayers }, () => [] as number[])
+          )
+        : null;
 
     // For normal mode: maskedImageNames[p] = opponent's image name masked
     // For royale mode: maskedImageNames[p] = all other players' image names masked (as JSON array)
     let maskedImageNames: string[];
 
-    if (room.gameMode === 'royale') {
+    if (room.gameMode === 'royale' && royaleHints) {
       // In royale, each player can see masked names for ALL other players' images
-      // maskedImageNames[p] = JSON-encoded array of masked names for all players
+      // Per (viewer, target) letter hints live in royaleLetterHints[viewer][target]
       maskedImageNames = room.players.map((_, p) => {
         const maskedForPlayer: { playerIndex: number; masked: string }[] = [];
         for (let other = 0; other < numPlayers; other++) {
           if (other === p) continue;
           const name = room.imageNames[other] || "";
-          const revealed = new Set(hints[p] || []);
+          const revealed = new Set(royaleHints[p]?.[other] || []);
           const masked = Array.from(name)
             .map((ch, i) => {
               if (/\s/.test(ch)) return " ";
@@ -671,8 +701,9 @@ io.on("connection", (socket: Socket) => {
       });
     }
 
+    const { guessLog: _guessLog, ...roomRest } = room;
     const safeRoom = {
-      ...room,
+      ...roomRest,
       images: undefined,
       imageHashes: room.imageHashes,
       imageMetadata: undefined,
@@ -698,64 +729,26 @@ io.on("connection", (socket: Socket) => {
       return;
     }
 
-    // Find which player is making the request
     const playerIndex = room.players.findIndex(p => p.socketId === socket.id);
     if (playerIndex === -1) {
       callback(false, "Player not in room");
       return;
     }
 
-    // Check if it's the player's turn
-    if (room.currentTurn !== playerIndex) {
-      callback(false, "Not your turn");
+    if (room.gameMode !== "normal") {
+      callback(false, "Use royale reveal in this mode");
       return;
     }
 
-    // The player reveals a tile from the OPPONENT's grid
-    const opponentIndex = 1 - playerIndex;
-
-    // Check if tile is already revealed
-    if (room.revealedTiles[opponentIndex].includes(tileIndex)) {
-      callback(false, "Tile already revealed");
+    const result = await applyRevealTileNormal(roomId, playerIndex, tileIndex, io);
+    if (!result.ok) {
+      callback(false, result.error);
       return;
     }
-
-    // Add tile to revealed tiles
-    room.revealedTiles[opponentIndex].push(tileIndex);
-
-    // Award 1 point to the player who revealed the tile
-    room.points[playerIndex] += 1;
-
-    // Clear freeze on the player who just took their turn (they survived the frozen turn)
-    if (room.freezeActive && room.freezeActive[playerIndex]) {
-      room.freezeActive[playerIndex] = false;
-    }
-
-    // Check if skip turn power-up is active
-    if (room.skipTurnActive) {
-      // Don't switch turn, but reset the flag for next time
-      room.skipTurnActive = false;
-      console.log(`Skip turn active - ${room.players[playerIndex].name} gets another turn`);
-    } else {
-      // Normal turn switch
-      room.currentTurn = 1 - room.currentTurn;
-    }
-
-    // Update room in DynamoDB
-    await updateGameRoom(room);
-
-    // Broadcast tile reveal to both players
-    // SECURITY: Only send imageHash, not full URL
-    io.to(roomId).emit("tile-revealed", {
-      tileIndex,
-      playerIndex: opponentIndex,
-      revealedBy: playerIndex,
-      currentTurn: room.currentTurn,
-      imageHash: room.imageHashes[opponentIndex], // Send hash instead of full URL
-      points: room.points,
-    });
-
     callback(true);
+    if (result.room.vsAi && result.room.currentTurn === 1 && result.room.gameState === "playing") {
+      scheduleAiTurn(roomId, io);
+    }
   });
 
   // Submit a guess (normal mode only)
@@ -769,72 +762,19 @@ io.on("connection", (socket: Socket) => {
     const playerIndex = room.players.findIndex(p => p.socketId === socket.id);
     if (playerIndex === -1) { callback(false, false, "Player not in room"); return; }
 
-    const opponentIndex = 1 - playerIndex;
-    const correctAnswer = room.imageNames[opponentIndex];
-    const playerOwnAnswer = room.imageNames[playerIndex];
-
-    const guessedOwnImage = fuzzyMatchStrings(guess, playerOwnAnswer);
-    if (guessedOwnImage && !fuzzyMatchStrings(guess, correctAnswer)) {
-      callback(false, false, "You guessed your own image! Try guessing your opponent's image.");
+    if (room.gameMode !== "normal") {
+      callback(false, false, "Use royale guess in this mode");
       return;
     }
-    
-    const isCorrect = fuzzyMatchStrings(guess, correctAnswer);
-    console.log(`🎯 Guess check: "${guess}" vs answer "${correctAnswer}" → ${isCorrect ? 'CORRECT ✅' : 'WRONG ❌'}`);
 
-    if (isCorrect) {
-      room.gameState = "finished";
-      room.winner = playerIndex;
-      await updateGameRoom(room);
-
-      const winnerPlayer = room.players[playerIndex];
-      const loserPlayer = room.players[opponentIndex];
-      const { updateUserStats, getUserById } = await import("../lib/userService");
-      
-      const winnerUser = await getUserById(winnerPlayer.id);
-      if (winnerUser) {
-        await updateUserStats(winnerPlayer.id, {
-          won: true,
-          points: room.points[playerIndex],
-          tilesRevealed: room.revealedTiles[playerIndex].length,
-          guessedCorrectly: true,
-        }).catch(error => console.error("Error updating winner stats:", error));
-      }
-
-      const loserUser = await getUserById(loserPlayer.id);
-      if (loserUser) {
-        await updateUserStats(loserPlayer.id, {
-          won: false,
-          points: room.points[opponentIndex],
-          tilesRevealed: room.revealedTiles[opponentIndex].length,
-          guessedCorrectly: false,
-        }).catch(error => console.error("Error updating loser stats:", error));
-      }
-
-      io.to(roomId).emit("game-end", {
-        winner: playerIndex,
-        winnerGuess: guess,
-        correctAnswer: correctAnswer,
-        imageNames: room.imageNames,
-      });
-
-      callback(true, true);
-    } else {
-      const usedNuke = room.nukeUsed && room.nukeUsed[playerIndex];
-      if (!usedNuke) {
-        room.points[playerIndex] += 1;
-      }
-      room.currentTurn = 1 - room.currentTurn;
-      await updateGameRoom(room);
-
-      io.to(roomId).emit("wrong-guess", {
-        playerIndex,
-        guess,
-        currentTurn: room.currentTurn,
-        points: room.points,
-      });
-
-      callback(true, false);
+    const result = await applySubmitGuessNormal(roomId, playerIndex, guess, io);
+    if (!result.ok) {
+      callback(false, false, result.error);
+      return;
+    }
+    callback(true, result.correct);
+    if (!result.correct && result.room.vsAi && result.room.currentTurn === 1 && result.room.gameState === "playing") {
+      scheduleAiTurn(roomId, io);
     }
   });
 
@@ -873,6 +813,21 @@ io.on("connection", (socket: Socket) => {
       callback(false, "You're frozen! Can't use power-ups this turn.");
       return;
     }
+
+    if (room.gameMode === "normal") {
+      const result = await applyPowerUpNormal(roomId, playerIndex, { powerUpId, tileIndex, lineType, lineIndex }, io);
+      if (!result.ok) {
+        callback(false, result.error);
+        return;
+      }
+      callback(true);
+      if (result.room.vsAi && result.room.currentTurn === 1 && result.room.gameState === "playing") {
+        scheduleAiTurn(roomId, io);
+      }
+      return;
+    }
+
+    // ─── Royale power-ups below ───
 
     // Define power-up costs
     const powerUpCosts: Record<string, number> = {
@@ -1099,65 +1054,110 @@ io.on("connection", (socket: Socket) => {
   // Use a hint – reveal one letter of the opponent's image name
   const HINT_COST = 3;
 
-  socket.on("use-hint", async (data: { roomId: string }, callback: (success: boolean, error?: string) => void) => {
-    const { roomId } = data;
-    const room = await getGameRoom(roomId);
+  socket.on(
+    "use-hint",
+    async (
+      data: { roomId: string; targetPlayerIndex?: number },
+      callback: (success: boolean, error?: string) => void
+    ) => {
+      const { roomId, targetPlayerIndex } = data;
+      const room = await getGameRoom(roomId);
 
-    if (!room) { callback(false, "Room not found"); return; }
-    if (room.gameState !== "playing") { callback(false, "Game not in progress"); return; }
+      if (!room) { callback(false, "Room not found"); return; }
+      if (room.gameState !== "playing") { callback(false, "Game not in progress"); return; }
 
-    const playerIndex = room.players.findIndex(p => p.socketId === socket.id);
-    if (playerIndex === -1) { callback(false, "Player not in room"); return; }
+      const playerIndex = room.players.findIndex(p => p.socketId === socket.id);
+      if (playerIndex === -1) { callback(false, "Player not in room"); return; }
 
-    // Check points
-    if (room.points[playerIndex] < HINT_COST) {
-      callback(false, "Not enough points (need 3)");
-      return;
-    }
-
-    const opponentIndex = 1 - playerIndex;
-    const answer = room.imageNames[opponentIndex]; // the word this player is guessing
-
-    if (!answer) { callback(false, "No image to hint"); return; }
-
-    // Initialise if missing (legacy rooms)
-    if (!room.revealedHints) room.revealedHints = [[], []];
-
-    // Build list of revealable character indices (letters/numbers only, skip spaces & punctuation)
-    const alreadyRevealed = new Set(room.revealedHints[playerIndex]);
-    const revealable: number[] = [];
-    for (let i = 0; i < answer.length; i++) {
-      if (/[a-zA-Z0-9]/.test(answer[i]) && !alreadyRevealed.has(i)) {
-        revealable.push(i);
+      if (room.gameMode === "normal") {
+        const result = await applyUseHintNormal(roomId, playerIndex, io);
+        if (!result.ok) {
+          callback(false, result.error);
+          return;
+        }
+        callback(true);
+        return;
       }
+
+      if (room.points[playerIndex] < HINT_COST) {
+        callback(false, "Not enough points (need 3)");
+        return;
+      }
+
+      const n = room.maxPlayers;
+      let targetIdx: number;
+
+      if (room.gameMode === "royale") {
+        if (targetPlayerIndex === undefined || targetPlayerIndex === playerIndex) {
+          callback(false, "Choose a player to buy a hint for");
+          return;
+        }
+        if (targetPlayerIndex < 0 || targetPlayerIndex >= n) {
+          callback(false, "Invalid target");
+          return;
+        }
+        targetIdx = targetPlayerIndex;
+      } else {
+        targetIdx = 1 - playerIndex;
+      }
+
+      const answer = room.imageNames[targetIdx];
+      if (!answer) { callback(false, "No image to hint"); return; }
+
+      if (!room.revealedHints) room.revealedHints = Array.from({ length: n }, () => []);
+
+      if (room.gameMode === "royale") {
+        if (!room.royaleLetterHints) {
+          room.royaleLetterHints = Array.from({ length: n }, () =>
+            Array.from({ length: n }, () => [] as number[])
+          );
+        }
+      }
+
+      const alreadyRevealed =
+        room.gameMode === "royale"
+          ? new Set(room.royaleLetterHints![playerIndex][targetIdx])
+          : new Set(room.revealedHints[playerIndex]);
+
+      const revealable: number[] = [];
+      for (let i = 0; i < answer.length; i++) {
+        if (/[a-zA-Z0-9]/.test(answer[i]) && !alreadyRevealed.has(i)) {
+          revealable.push(i);
+        }
+      }
+
+      if (revealable.length === 0) {
+        callback(false, "All letters already revealed for this image");
+        return;
+      }
+
+      const idx = revealable[Math.floor(Math.random() * revealable.length)];
+
+      room.points[playerIndex] -= HINT_COST;
+      if (room.gameMode === "royale") {
+        room.royaleLetterHints![playerIndex][targetIdx].push(idx);
+      } else {
+        room.revealedHints[playerIndex].push(idx);
+      }
+
+      await updateGameRoom(room);
+
+      io.to(roomId).emit("hint-revealed", {
+        playerIndex,
+        targetPlayerIndex: targetIdx,
+        charIndex: idx,
+        char: answer[idx],
+        revealedHints: room.revealedHints,
+        royaleLetterHints: room.royaleLetterHints,
+        points: room.points,
+      });
+
+      console.log(
+        `💡 Hint: Player ${playerIndex} revealed letter "${answer[idx]}" (index ${idx}) for target ${targetIdx} "${answer}" (${HINT_COST} pts)`
+      );
+      callback(true);
     }
-
-    if (revealable.length === 0) {
-      callback(false, "All letters already revealed");
-      return;
-    }
-
-    // Pick a random unrevealed character
-    const idx = revealable[Math.floor(Math.random() * revealable.length)];
-
-    // Deduct points & record the hint
-    room.points[playerIndex] -= HINT_COST;
-    room.revealedHints[playerIndex].push(idx);
-
-    await updateGameRoom(room);
-
-    // Broadcast to both players so the UI updates
-    io.to(roomId).emit("hint-revealed", {
-      playerIndex,        // who bought the hint
-      charIndex: idx,     // which character was revealed
-      char: answer[idx],  // the actual character
-      revealedHints: room.revealedHints,
-      points: room.points,
-    });
-
-    console.log(`💡 Hint: Player ${playerIndex} revealed letter "${answer[idx]}" (index ${idx}) of "${answer}" for ${HINT_COST} pts`);
-    callback(true);
-  });
+  );
 
   // Handle rematch request (now accepts an optional category / customQuery)
   socket.on("request-rematch", async ({ roomId, category: newCategory, customQuery: newCustomQuery }, callback) => {
@@ -1166,6 +1166,11 @@ io.on("connection", (socket: Socket) => {
       
       if (!room) {
         callback(false, "Room not found");
+        return;
+      }
+
+      if (room.vsAi) {
+        callback(false, "Rematch is not available in vs AI games");
         return;
       }
 
@@ -1207,6 +1212,11 @@ io.on("connection", (socket: Socket) => {
         room.gameState = 'waiting';
         room.revealedTiles = Array.from({ length: n }, () => []);
         room.revealedHints = Array.from({ length: n }, () => []);
+        if (room.gameMode === "royale") {
+          room.royaleLetterHints = Array.from({ length: n }, () =>
+            Array.from({ length: n }, () => [] as number[])
+          );
+        }
         room.points = Array(n).fill(0);
         room.currentTurn = Math.floor(Math.random() * n);
         room.winner = undefined;
@@ -1398,6 +1408,14 @@ io.on("connection", (socket: Socket) => {
 
     console.log(`🎯 Royale guess: Player ${playerIndex} guessed "${guess}" for player ${targetPlayerIndex}'s image "${correctAnswer}" → ${isCorrect ? 'CORRECT ✅' : 'WRONG ❌'}`);
 
+    io.to(roomId).emit("guess-made", {
+      playerIndex,
+      playerName: room.players[playerIndex]?.name || `Player ${playerIndex + 1}`,
+      guess,
+      correct: isCorrect,
+      targetPlayerIndex,
+    });
+
     if (isCorrect) {
       await updateGameRoom(room);
 
@@ -1455,6 +1473,99 @@ io.on("connection", (socket: Socket) => {
 
     callback(true);
     await checkAllPlayersActed(roomId, 'guess');
+  });
+
+  // ─── Spectator Support ─────────────────────────────────────────────────
+
+  // Validate a spectator code and look up the target room.
+  socket.on("validate-spectator-code", async (data: { code: string }, callback: (result: { valid: boolean; roomId?: string; preview?: { gameState: string; gameMode: string; category?: string; playerNames: string[] }; error?: string }) => void) => {
+    try {
+      const code = (data?.code || "").trim().toUpperCase();
+      if (code.length < 4) {
+        callback({ valid: false, error: "Code too short" });
+        return;
+      }
+      const room = await getRoomBySpectatorCode(code);
+      if (!room) {
+        callback({ valid: false, error: "No game found for that code" });
+        return;
+      }
+      if (room.gameState === "finished") {
+        callback({ valid: false, error: "That game has already ended" });
+        return;
+      }
+      callback({
+        valid: true,
+        roomId: room.roomId,
+        preview: {
+          gameState: room.gameState,
+          gameMode: room.gameMode,
+          category: room.category,
+          playerNames: room.players.map((p) => p.name),
+        },
+      });
+    } catch (error) {
+      console.error("Error validating spectator code:", error);
+      callback({ valid: false, error: "Failed to validate code" });
+    }
+  });
+
+  // Join a room as a spectator (read-only observer).
+  socket.on("join-as-spectator", async (data: { code: string }, callback: (result: { success: boolean; state?: any; error?: string }) => void) => {
+    try {
+      const code = (data?.code || "").trim().toUpperCase();
+      const room = await getRoomBySpectatorCode(code);
+      if (!room) {
+        callback({ success: false, error: "Invalid spectator code" });
+        return;
+      }
+      if (room.gameState === "finished") {
+        callback({ success: false, error: "That game has already ended" });
+        return;
+      }
+
+      socket.join(room.roomId);
+      addSpectator(room.roomId, socket.id);
+
+      const state = buildSpectatorState(room);
+      callback({ success: true, state });
+
+      // Notify the room (players + other spectators) that the count changed
+      io.to(room.roomId).emit("spectator-count-changed", {
+        count: getSpectatorCount(room.roomId),
+      });
+
+      console.log(`👁  Spectator ${socket.id} joined room ${room.roomId} (${getSpectatorCount(room.roomId)} watching)`);
+    } catch (error) {
+      console.error("Error joining as spectator:", error);
+      callback({ success: false, error: "Failed to join as spectator" });
+    }
+  });
+
+  // Explicit leave (also handled in disconnect).
+  socket.on("leave-spectator", () => {
+    const result = removeSpectator(socket.id);
+    if (result) {
+      socket.leave(result.roomId);
+      io.to(result.roomId).emit("spectator-count-changed", { count: result.count });
+      console.log(`👁  Spectator ${socket.id} left room ${result.roomId} (${result.count} watching)`);
+    }
+  });
+
+  // Fetch the current spectator-safe state for a room (e.g. after a reconnect).
+  socket.on("get-spectator-state", async (data: { code: string }, callback: (state: any) => void) => {
+    try {
+      const code = (data?.code || "").trim().toUpperCase();
+      const room = await getRoomBySpectatorCode(code);
+      if (!room) {
+        callback(null);
+        return;
+      }
+      callback(buildSpectatorState(room));
+    } catch (error) {
+      console.error("Error fetching spectator state:", error);
+      callback(null);
+    }
   });
 
   // ─── Rejoin Support ────────────────────────────────────────────────────
@@ -1534,6 +1645,15 @@ io.on("connection", (socket: Socket) => {
           });
         }
       }
+    }
+
+    // If this socket was spectating, clean it up and notify the room
+    const spectatorResult = removeSpectator(socket.id);
+    if (spectatorResult) {
+      io.to(spectatorResult.roomId).emit("spectator-count-changed", {
+        count: spectatorResult.count,
+      });
+      console.log(`👁  Spectator ${socket.id} disconnected from room ${spectatorResult.roomId} (${spectatorResult.count} watching)`);
     }
   });
 });

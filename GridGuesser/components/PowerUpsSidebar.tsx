@@ -19,6 +19,8 @@ export interface PowerUp {
 interface PowerUpsSidebarProps {
   myPoints: number;
   opponentPoints: number;
+  /** When set with gameMode royale, shows each other player’s score instead of a single opponent total */
+  allPlayerPoints?: number[];
   isMyTurn: boolean;
   /** Tile-select modes (peek, reveal2x2, revealLine) — owned by parent so highlight clears after use */
   selectedPowerUp: string | null;
@@ -105,6 +107,7 @@ const powerUps: PowerUp[] = [
 export default function PowerUpsSidebar({
   myPoints,
   opponentPoints,
+  allPlayerPoints,
   isMyTurn,
   selectedPowerUp,
   onUsePowerUp,
@@ -199,12 +202,34 @@ export default function PowerUpsSidebar({
           <p className="text-xs mt-1 opacity-90">+1 point per tile revealed</p>
         </div>
 
-        <div className="bg-gray-200 dark:bg-gray-700 rounded-lg p-4">
-          <div className="flex items-center justify-between">
-            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Opponent Points</span>
-            <span className="text-2xl font-bold text-gray-800 dark:text-gray-100">{opponentPoints}</span>
+        {isRoyale && allPlayerPoints && myPlayerIndex !== undefined ? (
+          <div className="bg-gray-200 dark:bg-gray-700 rounded-lg p-4 space-y-2">
+            <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Other players</p>
+            {players
+              .filter((p) => p.playerIndex !== myPlayerIndex)
+              .sort((a, b) => a.playerIndex - b.playerIndex)
+              .map((p) => (
+                <div
+                  key={p.playerIndex}
+                  className="flex items-center justify-between gap-2 text-sm"
+                >
+                  <span className="text-gray-700 dark:text-gray-200 truncate font-medium">
+                    {p.name}
+                  </span>
+                  <span className="text-lg font-bold text-gray-900 dark:text-gray-100 tabular-nums shrink-0">
+                    {allPlayerPoints[p.playerIndex] ?? 0}
+                  </span>
+                </div>
+              ))}
           </div>
-        </div>
+        ) : (
+          <div className="bg-gray-200 dark:bg-gray-700 rounded-lg p-4">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Opponent Points</span>
+              <span className="text-2xl font-bold text-gray-800 dark:text-gray-100">{opponentPoints}</span>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Target Picker (Royale) */}

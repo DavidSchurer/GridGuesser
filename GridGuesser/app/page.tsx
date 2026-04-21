@@ -8,7 +8,7 @@ import CategorySelector from "../components/CategorySelector";
 import GameModeSelector from "../components/GameModeSelector";
 import { useAuth } from "../lib/authContext";
 import { connectSocket, disconnectSocket } from "../lib/socket";
-import { GameMode } from "../lib/types";
+import { GameMode, AiDifficulty } from "../lib/types";
 
 interface RejoinInfo {
   roomId: string;
@@ -30,8 +30,13 @@ export default function Home() {
   const [maxPlayers, setMaxPlayers] = useState(4);
   const [selectedCategory, setSelectedCategory] = useState("landmarks");
   const [customQuery, setCustomQuery] = useState("");
+  const [vsAi, setVsAi] = useState(false);
+  const [aiDifficulty, setAiDifficulty] = useState<AiDifficulty>("medium");
   const [action, setAction] = useState<'create' | 'join' | null>(null);
   const [rejoinInfo, setRejoinInfo] = useState<RejoinInfo | null>(null);
+  const [spectateCode, setSpectateCode] = useState("");
+  const [spectateError, setSpectateError] = useState<string | null>(null);
+  const [isValidatingSpectate, setIsValidatingSpectate] = useState(false);
   const router = useRouter();
   const { user } = useAuth();
 
@@ -68,9 +73,42 @@ export default function Home() {
     setRejoinInfo(null);
   };
 
+  const handleSpectateClick = () => {
+    const code = spectateCode.trim().toUpperCase();
+    if (code.length < 4) {
+      setSpectateError("Enter a valid spectator code");
+      return;
+    }
+    setSpectateError(null);
+    setIsValidatingSpectate(true);
+
+    const sock = connectSocket();
+    sock.emit(
+      "validate-spectator-code",
+      { code },
+      (result: { valid: boolean; roomId?: string; error?: string }) => {
+        setIsValidatingSpectate(false);
+        disconnectSocket();
+        if (result.valid) {
+          router.push(`/spectate/${code}`);
+        } else {
+          setSpectateError(result.error || "Invalid spectator code");
+        }
+      }
+    );
+  };
+
   const handleCreateClick = () => {
+    setVsAi(false);
     setAction('create');
     setShowModeSelection(true);
+  };
+
+  const handleVsAiClick = () => {
+    setVsAi(true);
+    setSelectedMode("normal");
+    setAction('create');
+    setShowCategorySelection(true);
   };
 
   const handleModeSelected = () => {
@@ -105,6 +143,9 @@ export default function Home() {
       if (selectedCategory === 'custom' && customQuery.trim()) {
         url += `&customQuery=${encodeURIComponent(customQuery.trim())}`;
       }
+      if (vsAi && selectedMode === 'normal') {
+        url += `&vsAi=1&aiDifficulty=${encodeURIComponent(aiDifficulty)}`;
+      }
 
       router.push(url);
     } else if (action === 'join') {
@@ -118,6 +159,7 @@ export default function Home() {
     setShowModeSelection(false);
     setAction(null);
     setPlayerName("");
+    setVsAi(false);
   };
 
   const handleBackFromName = () => {
@@ -131,7 +173,12 @@ export default function Home() {
 
   const handleBackFromCategory = () => {
     setShowCategorySelection(false);
-    setShowModeSelection(true);
+    if (vsAi) {
+      setVsAi(false);
+      setAction(null);
+    } else {
+      setShowModeSelection(true);
+    }
   };
 
   return (
@@ -208,6 +255,28 @@ export default function Home() {
                   customQuery={customQuery}
                   onCustomQueryChange={setCustomQuery}
                 />
+
+                {vsAi && (
+                  <div className="mt-6 space-y-2">
+                    <p className="text-sm font-medium text-gray-700 dark:text-gray-300">AI difficulty</p>
+                    <div className="flex flex-wrap gap-2">
+                      {(['easy', 'medium', 'hard'] as const).map((d) => (
+                        <button
+                          key={d}
+                          type="button"
+                          onClick={() => setAiDifficulty(d)}
+                          className={`px-4 py-2 rounded-lg text-sm font-medium capitalize transition-colors ${
+                            aiDifficulty === d
+                              ? "bg-emerald-600 text-white"
+                              : "bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600"
+                          }`}
+                        >
+                          {d}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 
                 <button
                   onClick={handleCategorySelected}
@@ -274,6 +343,15 @@ export default function Home() {
                   {isCreating ? "Creating Room..." : "Create New Game"}
                 </button>
 
+                <button
+                  type="button"
+                  onClick={handleVsAiClick}
+                  disabled={isCreating}
+                  className="w-full py-4 px-6 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white rounded-xl font-semibold text-lg transition-all duration-200 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
+                >
+                  Play vs AI
+                </button>
+
                 <div className="relative">
                   <div className="absolute inset-0 flex items-center">
                     <div className="w-full border-t border-gray-300 dark:border-gray-600"></div>
@@ -303,6 +381,34 @@ export default function Home() {
                     className="w-full py-4 px-6 bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 text-white rounded-xl font-semibold text-lg transition-all duration-200 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
                   >
                     Join Game
+                  </button>
+                </div>
+
+                <div className="space-y-3 pt-4 border-t border-gray-200 dark:border-gray-700">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center gap-2">
+                    <span aria-hidden>&#128065;</span> Spectate a Game
+                  </label>
+                  <input
+                    type="text"
+                    value={spectateCode}
+                    onChange={(e) => {
+                      setSpectateError(null);
+                      setSpectateCode(e.target.value.replace(/[^a-zA-Z0-9]/g, "").slice(0, 6).toUpperCase());
+                    }}
+                    onKeyDown={(e) => e.key === "Enter" && handleSpectateClick()}
+                    placeholder="Enter spectator code"
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent dark:bg-gray-700 dark:text-white text-center text-2xl tracking-widest font-mono"
+                    maxLength={6}
+                  />
+                  {spectateError && (
+                    <p className="text-sm text-red-500 dark:text-red-400">{spectateError}</p>
+                  )}
+                  <button
+                    onClick={handleSpectateClick}
+                    disabled={spectateCode.length < 4 || isValidatingSpectate}
+                    className="w-full py-4 px-6 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white rounded-xl font-semibold text-lg transition-all duration-200 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
+                  >
+                    {isValidatingSpectate ? "Checking..." : "Spectate Game"}
                   </button>
                 </div>
               </div>

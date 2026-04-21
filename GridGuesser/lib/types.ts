@@ -1,11 +1,14 @@
 export type GameMode = 'normal' | 'royale';
 export type RoyalePhase = 'reveal' | 'guess' | 'idle';
+export type AiDifficulty = 'easy' | 'medium' | 'hard';
 
 export interface Player {
   id: string;
   socketId: string;
   playerIndex: number;
   name: string;
+  /** Synthetic opponent for vs-AI normal games */
+  isAi?: boolean;
 }
 
 export interface GameRoom {
@@ -24,6 +27,8 @@ export interface GameRoom {
   customQuery?: string;
   imageMetadata?: (DynamicImageMetadata | null)[];
   revealedHints?: number[][];
+  /** Royale: letter indices revealed per (buyer, target) for imageNames[target]. Normal mode uses revealedHints[buyer] only. */
+  royaleLetterHints?: number[][][];
   maskedImageNames?: string[];
   skipTurnActive?: boolean; // normal mode: current player gets an extra turn
   freezeActive?: boolean[];
@@ -32,9 +37,18 @@ export interface GameRoom {
   rematchCustomQuery?: string;
   nukeUsed?: boolean[];
 
+  /** Shareable code friends can use to spectate this game. */
+  spectatorCode?: string;
+
   // Game mode
   gameMode: GameMode;
   maxPlayers: number; // 2 for normal, 3 or 4 for royale
+
+  /** Normal mode: single human vs server-controlled AI */
+  vsAi?: boolean;
+  aiDifficulty?: AiDifficulty;
+  /** Server-side: recent wrong guesses for AI prompts (vs AI); omitted from client get-game-state */
+  guessLog?: { playerIndex: number; text: string }[];
 
   // Royale-specific fields
   royalePhase?: RoyalePhase;

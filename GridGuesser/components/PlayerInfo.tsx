@@ -6,6 +6,10 @@ interface PlayerInfoProps {
   isActive: boolean;
   isYou?: boolean;
   compact?: boolean;
+  /** Show small AI label (vs-AI games) */
+  aiBadge?: boolean;
+  /** Difficulty label when aiBadge */
+  aiDifficultyLabel?: string;
 }
 
 export default function PlayerInfo({
@@ -14,6 +18,8 @@ export default function PlayerInfo({
   isActive,
   isYou = false,
   compact = false,
+  aiBadge = false,
+  aiDifficultyLabel,
 }: PlayerInfoProps) {
   return (
     <div className={`
@@ -43,6 +49,16 @@ export default function PlayerInfo({
           {isYou && (
             <span className={`shrink-0 text-[10px] px-1 py-0.5 rounded ${isActive ? 'bg-white/30 text-white' : 'bg-blue-500 text-white'}`}>
               You
+            </span>
+          )}
+          {aiBadge && (
+            <span
+              className={`shrink-0 text-[10px] px-1 py-0.5 rounded uppercase tracking-wide ${
+                isActive ? "bg-white/25 text-white" : "bg-emerald-600/90 text-white"
+              }`}
+              title={aiDifficultyLabel ? `Difficulty: ${aiDifficultyLabel}` : "AI opponent"}
+            >
+              AI{aiDifficultyLabel ? ` · ${aiDifficultyLabel}` : ""}
             </span>
           )}
         </div>
