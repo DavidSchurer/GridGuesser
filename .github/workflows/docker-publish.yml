@@ -29,17 +29,24 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Require NEXT_PUBLIC_* secrets for frontend image
+      # Non-fatal check: if the NEXT_PUBLIC_* secrets aren't configured,
+      # we skip the frontend image build (backend image still ships).
+      # To publish the frontend image, add all three secrets under
+      # Settings → Secrets and variables → Actions.
+      - name: Check frontend secrets
+        id: check_frontend_secrets
         env:
           A: ${{ secrets.NEXT_PUBLIC_APP_URL }}
           S: ${{ secrets.NEXT_PUBLIC_SOCKET_URL }}
           P: ${{ secrets.NEXT_PUBLIC_API_URL }}
         run: |
-          missing=0
-          [ -z "$A" ] && echo "::error::Missing secret NEXT_PUBLIC_APP_URL (public frontend URL, e.g. https://app.example.com)" && missing=1
-          [ -z "$S" ] && echo "::error::Missing secret NEXT_PUBLIC_SOCKET_URL (public backend URL for Socket.IO)" && missing=1
-          [ -z "$P" ] && echo "::error::Missing secret NEXT_PUBLIC_API_URL (e.g. https://api.example.com/api)" && missing=1
-          exit $missing
+          if [ -n "$A" ] && [ -n "$S" ] && [ -n "$P" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+            echo "All NEXT_PUBLIC_* secrets present — frontend image will be built."
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::One or more NEXT_PUBLIC_* secrets missing — skipping frontend image. Add NEXT_PUBLIC_APP_URL, NEXT_PUBLIC_SOCKET_URL, NEXT_PUBLIC_API_URL to repo secrets to enable it."
+          fi
 
       - name: Lowercase owner for GHCR
         run: echo "IMAGE_OWNER=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
@@ -78,6 +85,7 @@ jobs:
 
       - name: Docker metadata (frontend)
         id: meta-frontend
+        if: steps.check_frontend_secrets.outputs.present == 'true'
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/${{ env.IMAGE_OWNER }}/gridguesser-frontend
@@ -88,6 +96,7 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and push frontend
+        if: steps.check_frontend_secrets.outputs.present == 'true'
         uses: docker/build-push-action@v6
         with:
           context: ./GridGuesser
