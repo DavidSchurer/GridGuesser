@@ -1,10 +1,12 @@
-# GridGuesser: A Multiplayer Grid-Based Guessing Game
+# GridGuesser: A Multiplayer Grid-Based Image Guessing Game
 
 **Developed By:** David Schurer
 
 ## Overview
 
-GridGuesser is an interactive, real-time multiplayer guessing game where players collaborate in game rooms to guess patterns, solve puzzles, and compete on a dynamic grid. The application features seamless multiplayer synchronization using WebSocket connections, AI-powered puzzle generation via Google's Generative AI, and persistent game state management. Built as a modern web application with a React.js frontend and a robust Express.js backend, GridGuesser delivers an engaging and responsive gaming experience across all devices.
+GridGuesser is a competitive, real-time multiplayer image guessing game where two players race to correctly identify hidden images. Each player is assigned a 10x10 tile grid that conceals a unique image from the same category as their opponent's. Players take turns revealing tiles on both grids to gradually uncover clues and guess the hidden image before their opponent.
+
+The game introduces strategic power-ups, competitive turn-based mechanics, and synchronized multiplayer gameplay using WebSockets. Built with modern React/Next.js frontend and a scalable Express.js backend, GridGuesser delivers a fast, responsive, and engaging multiplayer experience across devices.
 
 ## Live Website
 
@@ -14,9 +16,9 @@ https://grid-guesser.vercel.app/
 
 - **Real-Time Multiplayer Gaming:** Socket.IO-powered real-time synchronization allows multiple players to join game rooms and interact simultaneously with instant updates for all participants.
 
-- **Dynamic Grid-Based Gameplay:** Interactive grid interface where players make guesses, receive feedback, and work collaboratively or competitively to solve puzzles and unlock patterns.
+- **Dynamic Grid-Based Gameplay:** Interactive grid interface where players make image guesses, receive feedback on if answer was correct or not, and work competitively to solve opponent's image and unlock in-game power-ups.
 
-- **AI-Powered Puzzle Generation:** Integrated with Google's Generative AI to create diverse, intelligent, and adaptable puzzles that scale in difficulty based on player progression.
+- **AI-Powered Dynamic Image Sourcing:** Integrated Google Gemini 2.5 Flash to generate context-aware subtopics for any user-entered image category, then retrieved relevant images via Google Custom Search, enabling infinite, on-demand images.
 
 - **Secure Authentication System:** BCrypt-protected passwords with JWT-based session management ensures secure user accounts and persistent authentication across sessions.
 
