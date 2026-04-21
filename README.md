@@ -36,7 +36,7 @@ https://grid-guesser.vercel.app/
 **Backend:** Express.js, Node.js, TypeScript, Socket.IO  
 **Database:** AWS DynamoDB, Redis  
 **Authentication:** JWT, BCryptJS  
-**AI Integration:** Google Generative AI  
+**AI Integration:** Google Gemini 2.5 Flash API 
 **Deployment:** Vercel  
 **Testing:** Vitest, Playwright  
 **Package Manager:** npm
