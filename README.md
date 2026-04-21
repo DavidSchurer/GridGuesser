@@ -91,35 +91,6 @@ https://grid-guesser.vercel.app/
 
 7. Open [http://localhost:3000](http://localhost:3000) in your browser to access the application.
 
-## Usage Instructions
-
-### Creating a Game
-
-1. Navigate to the live website at https://grid-guesser.vercel.app/
-2. Create a new account or log in with an existing account
-3. From the home screen, click "Create Game Room" to start a new multiplayer session
-4. Share the generated room code with other players
-
-### Joining a Game
-
-1. Log in to your account
-2. Click "Join Game Room" and enter the room code from an existing game
-3. You will be added to the game room and can begin playing immediately
-
-### Playing the Game
-
-1. View the grid interface and analyze the puzzle pattern
-2. Make your guesses by clicking on grid cells or entering answers based on the current puzzle
-3. Receive real-time feedback on your guesses
-4. Collaborate with other players in the room or compete for the highest score
-5. Complete puzzles to earn points and unlock new levels
-
-### Managing Your Profile
-
-- Click on your profile icon to view your account information
-- Update your profile settings, including username and preferences
-- View your game statistics and historical results
-
 ## Available Scripts
 
 ```bash
