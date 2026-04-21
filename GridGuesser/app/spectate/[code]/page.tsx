@@ -327,15 +327,17 @@ export default function SpectatePage() {
               {room.players.map((player, idx) => {
                 const points = room.points[idx] || 0;
                 const nameRevealed = room.gameState === "finished" && room.imageNames?.[idx];
-                const masked = (() => {
+                const masked: string = (() => {
                   // Royale masked names are JSON arrays per viewer; spectator server returns
                   // a flattened per-image masked string. If parse fails, show raw string.
                   const raw = room.maskedImageNames?.[idx] || "";
                   try {
-                    const parsed = JSON.parse(raw);
+                    const parsed: unknown = JSON.parse(raw);
                     if (Array.isArray(parsed)) {
-                      const self = parsed.find((e: any) => e.playerIndex === idx);
-                      return self?.masked || raw;
+                      const self = parsed.find((e: { playerIndex?: number; masked?: string }) => e?.playerIndex === idx);
+                      if (self && typeof self.masked === "string") {
+                        return self.masked;
+                      }
                     }
                   } catch {}
                   return raw;
