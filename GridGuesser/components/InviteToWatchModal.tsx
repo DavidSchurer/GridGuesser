@@ -58,7 +58,7 @@ export default function InviteToWatchModal({ isOpen, onClose, spectatorCode, wat
           >
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
-                <span aria-hidden>&#128065;</span> Invite to Watch
+                <span aria-hidden>&#128065;</span> Invite Spectator
               </h2>
               <button
                 onClick={onClose}

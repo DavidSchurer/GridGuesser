@@ -1088,11 +1088,11 @@ export default function GameRoomPage() {
             <button
               onClick={() => setShowInviteWatchModal(true)}
               className="px-3 py-2 bg-amber-100 dark:bg-amber-900/40 hover:bg-amber-200 dark:hover:bg-amber-800/50 text-amber-800 dark:text-amber-200 rounded-lg transition-colors text-sm font-semibold flex items-center gap-1.5 whitespace-nowrap"
-              title="Invite friends to watch"
+              title="Invite a spectator"
             >
               <span aria-hidden>&#128065;</span>
-              <span className="hidden sm:inline">Invite to Watch</span>
-              <span className="sm:hidden">Watch</span>
+              <span className="hidden sm:inline">Invite Spectator</span>
+              <span className="sm:hidden">Spectate</span>
             </button>
             {spectatorCount > 0 && (
               <span className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1">
@@ -1358,9 +1358,8 @@ export default function GameRoomPage() {
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           {/* Opponent's Grid */}
           <div className="flex flex-col items-center">
-            <h3 className="text-xl font-semibold mb-4 text-gray-800 dark:text-gray-100 flex items-center gap-2">
-              <span className="text-purple-600 dark:text-purple-400">{opponentName}&apos;s</span> Grid - Guess This!
-              <Icon name="target" size={24} className="text-red-500" />
+            <h3 className="text-xl font-semibold mb-4 text-purple-600 dark:text-purple-400">
+              Opponent&apos;s Grid
             </h3>
             <GameGrid
               key={`opponent-${opponentImageHash}-${gameResetKey}`}
@@ -1420,9 +1419,8 @@ export default function GameRoomPage() {
 
           {/* My Grid */}
           <div className="flex flex-col items-center">
-            <h3 className="text-xl font-semibold mb-4 text-gray-800 dark:text-gray-100 flex items-center gap-2">
-              <span className="text-blue-600 dark:text-blue-400">Your</span> Grid ({myName}) - They&apos;re Guessing This!
-              <Icon name="image" size={24} className="text-purple-500" />
+            <h3 className="text-xl font-semibold mb-4 text-blue-600 dark:text-blue-400">
+              Your Grid
             </h3>
             <GameGrid
               key={`my-${myImageHash}-${gameResetKey}`}

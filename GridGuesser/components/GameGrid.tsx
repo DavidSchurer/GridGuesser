@@ -262,9 +262,8 @@ export default function GameGrid({
       </div>
       
       <div className="mt-2 text-sm text-center text-gray-600 dark:text-gray-400">
-        {isOpponentGrid ? "Opponent's Grid" : "Your Grid"}
-        <span className="ml-2 font-semibold">
-          ({revealedTiles.length}/100 revealed)
+        <span className="font-semibold">
+          {revealedTiles.length}/100 revealed
         </span>
       </div>
     </div>
