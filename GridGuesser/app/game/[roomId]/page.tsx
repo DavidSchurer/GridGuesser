@@ -53,6 +53,7 @@ export default function GameRoomPage() {
   const [opponentRematchCategory, setOpponentRematchCategory] = useState<string | null>(null);
   const [opponentRematchCustomQuery, setOpponentRematchCustomQuery] = useState<string | null>(null);
   const [showCategoryPicker, setShowCategoryPicker] = useState(false);
+  const [rematchError, setRematchError] = useState<string | null>(null);
 
   // Revealed image names shown after game ends
   const [revealedImageNames, setRevealedImageNames] = useState<[string, string] | null>(null);
@@ -589,6 +590,7 @@ export default function GameRoomPage() {
       setShowCategoryPicker(false);
       setOpponentRematchCategory(null);
       setOpponentRematchCustomQuery(null);
+      setRematchError(null);
       setPeekTiles([]);
       setIsFrozen(false);
       setSelectedPowerUp(null);
@@ -700,6 +702,7 @@ export default function GameRoomPage() {
       setShowCategoryPicker(false);
       setOpponentRematchCategory(null);
       setOpponentRematchCustomQuery(null);
+      setRematchError(null);
     });
 
     // Listen for player disconnection
@@ -884,14 +887,15 @@ export default function GameRoomPage() {
 
   const handleRematchRequest = (category?: string, customQuery?: string) => {
     if (!socket || playerIndex === null) return;
-    
+
+    setRematchError(null);
     setRematchRequested(true);
     socket.emit(
       "request-rematch",
       { roomId, category, customQuery },
       (success: boolean, errorMsg?: string) => {
         if (!success) {
-          showNotification(errorMsg || "Failed to request rematch");
+          setRematchError(errorMsg || "Failed to request rematch");
           setRematchRequested(false);
         } else {
           showNotification("Rematch requested! Waiting for opponent...");
@@ -910,6 +914,7 @@ export default function GameRoomPage() {
     setShowCategoryPicker(false);
     setOpponentRematchCategory(null);
     setOpponentRematchCustomQuery(null);
+    setRematchError(null);
   };
 
   if (error) {
@@ -1515,11 +1520,25 @@ export default function GameRoomPage() {
                       <div className="mb-4">
                         <CategorySelector
                           selectedCategory={rematchCategory}
-                          onCategoryChange={setRematchCategory}
+                          onCategoryChange={(cat) => {
+                            setRematchCategory(cat);
+                            if (rematchError) setRematchError(null);
+                          }}
                           customQuery={rematchCustomQuery}
-                          onCustomQueryChange={setRematchCustomQuery}
+                          onCustomQueryChange={(value) => {
+                            setRematchCustomQuery(value);
+                            if (rematchError) setRematchError(null);
+                          }}
                         />
                       </div>
+                      {rematchError && (
+                        <div
+                          role="alert"
+                          className="mb-4 px-4 py-3 rounded-lg bg-red-900/30 border border-red-700 text-red-300 text-sm font-medium"
+                        >
+                          {rematchError}
+                        </div>
+                      )}
                       <div className="space-y-3">
                         <button
                           onClick={() => {
@@ -1533,7 +1552,10 @@ export default function GameRoomPage() {
                           Start Rematch
                         </button>
                         <button
-                          onClick={() => setShowCategoryPicker(false)}
+                          onClick={() => {
+                            setShowCategoryPicker(false);
+                            setRematchError(null);
+                          }}
                           className="w-full px-6 py-3 bg-gray-700 hover:bg-gray-600 text-white rounded-lg font-semibold transition-all duration-200"
                         >
                           Back

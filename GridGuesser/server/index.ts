@@ -43,6 +43,7 @@ import {
   applyUseHintNormal,
   applyPowerUpNormal,
 } from "./normalModeActions";
+import { validateCategory } from "../lib/contentFilter";
 
 const app = express();
 const httpServer = createServer(app);
@@ -483,6 +484,30 @@ io.on("connection", (socket: Socket) => {
   
   console.log(`User connected: ${socket.id}${userId ? ` (User: ${username})` : " (Guest)"}`);
 
+  // Quick keyword-only moderation check used by the home page before
+  // navigating into a game. The full validateCategory (with LLM) still runs
+  // server-side at room creation and rematch time.
+  socket.on(
+    "validate-category",
+    async (
+      data: { customQuery?: string },
+      callback: (result: { allowed: boolean; reason?: string }) => void
+    ) => {
+      try {
+        const customQuery = (data?.customQuery || "").trim();
+        if (!customQuery) {
+          callback({ allowed: true });
+          return;
+        }
+        const result = await validateCategory(customQuery, { skipLlm: true });
+        callback(result);
+      } catch (error: any) {
+        console.error("[validate-category] error:", error?.message || error);
+        callback({ allowed: true });
+      }
+    }
+  );
+
   // Create a new game room
   socket.on("create-room", async (data: { playerName: string; category?: string; gameMode?: GameMode; maxPlayers?: number }, callback: (roomId: string) => void) => {
     const roomId = generateRoomId();
@@ -528,7 +553,16 @@ io.on("connection", (socket: Socket) => {
 
     const selectedCategory = category || 'landmarks';
     const finalPlayerName = playerName || username || 'Player 1';
-    
+
+    if (selectedCategory === 'custom' && customQuery && customQuery.trim()) {
+      const moderation = await validateCategory(customQuery);
+      if (!moderation.allowed) {
+        console.log(`[contentFilter] Blocked custom category for create-room-with-id (${roomId}): "${customQuery}"`);
+        callback(false, moderation.reason ?? "That category isn't allowed.");
+        return;
+      }
+    }
+
     if (userId) {
       await storeUserCategory(userId, selectedCategory);
     }
@@ -1179,6 +1213,15 @@ io.on("connection", (socket: Socket) => {
       if (playerIndex === -1) {
         callback(false, "You are not in this room");
         return;
+      }
+
+      if (newCategory === 'custom' && newCustomQuery && newCustomQuery.trim()) {
+        const moderation = await validateCategory(newCustomQuery);
+        if (!moderation.allowed) {
+          console.log(`[contentFilter] Blocked custom rematch category for room ${roomId}: "${newCustomQuery}"`);
+          callback(false, moderation.reason ?? "That category isn't allowed.");
+          return;
+        }
       }
 
       const n = room.maxPlayers;

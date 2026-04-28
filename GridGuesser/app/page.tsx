@@ -37,6 +37,8 @@ export default function Home() {
   const [spectateCode, setSpectateCode] = useState("");
   const [spectateError, setSpectateError] = useState<string | null>(null);
   const [isValidatingSpectate, setIsValidatingSpectate] = useState(false);
+  const [categoryError, setCategoryError] = useState<string | null>(null);
+  const [isValidatingCategory, setIsValidatingCategory] = useState(false);
   const router = useRouter();
   const { user } = useAuth();
 
@@ -117,8 +119,32 @@ export default function Home() {
   };
 
   const handleCategorySelected = () => {
-    setShowCategorySelection(false);
-    setShowNameInput(true);
+    if (selectedCategory !== 'custom' || !customQuery.trim()) {
+      setCategoryError(null);
+      setShowCategorySelection(false);
+      setShowNameInput(true);
+      return;
+    }
+
+    setIsValidatingCategory(true);
+    setCategoryError(null);
+
+    const sock = connectSocket();
+    sock.emit(
+      "validate-category",
+      { customQuery },
+      (result: { allowed: boolean; reason?: string }) => {
+        setIsValidatingCategory(false);
+        disconnectSocket();
+        if (!result.allowed) {
+          setCategoryError(result.reason ?? "That category isn't allowed.");
+          return;
+        }
+        setCategoryError(null);
+        setShowCategorySelection(false);
+        setShowNameInput(true);
+      }
+    );
   };
 
   const handleJoinClick = () => {
@@ -160,6 +186,7 @@ export default function Home() {
     setAction(null);
     setPlayerName("");
     setVsAi(false);
+    setCategoryError(null);
   };
 
   const handleBackFromName = () => {
@@ -253,7 +280,10 @@ export default function Home() {
                   selectedCategory={selectedCategory}
                   onCategoryChange={setSelectedCategory}
                   customQuery={customQuery}
-                  onCustomQueryChange={setCustomQuery}
+                  onCustomQueryChange={(value) => {
+                    setCustomQuery(value);
+                    if (categoryError) setCategoryError(null);
+                  }}
                 />
 
                 {vsAi && (
@@ -278,12 +308,24 @@ export default function Home() {
                   </div>
                 )}
                 
+                {categoryError && (
+                  <div
+                    role="alert"
+                    className="mt-4 px-4 py-3 rounded-lg bg-red-50 dark:bg-red-900/30 border border-red-300 dark:border-red-700 text-red-700 dark:text-red-300 text-sm font-medium"
+                  >
+                    {categoryError}
+                  </div>
+                )}
+
                 <button
                   onClick={handleCategorySelected}
-                  disabled={selectedCategory === 'custom' && customQuery.trim().length === 0}
+                  disabled={
+                    isValidatingCategory ||
+                    (selectedCategory === 'custom' && customQuery.trim().length === 0)
+                  }
                   className="w-full mt-6 py-4 px-6 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white rounded-xl font-semibold text-lg transition-all duration-200 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
                 >
-                  Continue
+                  {isValidatingCategory ? "Checking..." : "Continue"}
                 </button>
               </div>
             </div>
