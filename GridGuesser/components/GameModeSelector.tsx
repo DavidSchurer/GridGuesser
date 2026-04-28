@@ -29,20 +29,17 @@ export default function GameModeSelector({
           }
         `}
       >
-        <div className="flex items-center gap-3">
-          <span className="text-3xl">&#9876;&#65039;</span>
-          <div>
-            <div className="font-bold text-lg text-gray-800 dark:text-gray-100">
-              Normal
-            </div>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              Classic 1v1. Take turns revealing tiles and guess your opponent&apos;s
-              image.
-            </p>
-            <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
-              2 players
-            </p>
+        <div>
+          <div className="font-bold text-lg text-gray-800 dark:text-gray-100">
+            Normal
           </div>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+            Classic 1v1. Take turns revealing tiles and guess your opponent&apos;s
+            image.
+          </p>
+          <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
+            2 players
+          </p>
         </div>
       </button>
 
@@ -57,20 +54,17 @@ export default function GameModeSelector({
           }
         `}
       >
-        <div className="flex items-center gap-3">
-          <span className="text-3xl">&#128081;</span>
-          <div>
-            <div className="font-bold text-lg text-gray-800 dark:text-gray-100">
-              Grid Royale
-            </div>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              Free-for-all with 3-4 players. Timed rounds, guess any opponent&apos;s
-              image, race to 1st place!
-            </p>
-            <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
-              3-4 players &middot; 20s rounds
-            </p>
+        <div>
+          <div className="font-bold text-lg text-gray-800 dark:text-gray-100">
+            Grid Royale
           </div>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+            Free-for-all with 3-4 players. Timed rounds, guess any opponent&apos;s
+            image, race to 1st place!
+          </p>
+          <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
+            3-4 players &middot; 20s rounds
+          </p>
         </div>
       </button>
 
