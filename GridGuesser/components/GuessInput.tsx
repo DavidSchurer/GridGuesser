@@ -39,7 +39,7 @@ export default function GuessInput({
 
   return (
     <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 mt-6">
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={handleSubmit} className="space-y-4" autoComplete="off">
         <div>
           <label
             htmlFor="guess"
@@ -56,6 +56,7 @@ export default function GuessInput({
               placeholder="Enter your guess..."
               disabled={disabled || isSubmitting}
               className="flex-1 px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent dark:bg-gray-700 dark:text-white disabled:opacity-50 disabled:cursor-not-allowed"
+              autoComplete="off"
             />
             <button
               type="submit"

@@ -193,6 +193,7 @@ export default function CategorySelector({
           bg-white dark:bg-gray-800
         `}
         autoFocus
+        autoComplete="off"
       />
 
       {localCustomQuery.trim().length > 0 && (

@@ -359,6 +359,7 @@ export default function Home() {
                     className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-gray-700 dark:text-white text-lg mb-4"
                     maxLength={20}
                     autoFocus
+                    autoComplete="off"
                   />
                 )}
                 
@@ -418,6 +419,7 @@ export default function Home() {
                     placeholder="Enter 6-digit code"
                     className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent dark:bg-gray-700 dark:text-white text-center text-2xl tracking-widest font-mono"
                     maxLength={6}
+                    autoComplete="off"
                   />
                   <button
                     onClick={handleJoinClick}
@@ -443,6 +445,7 @@ export default function Home() {
                     placeholder="Enter spectator code"
                     className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent dark:bg-gray-700 dark:text-white text-center text-2xl tracking-widest font-mono"
                     maxLength={6}
+                    autoComplete="off"
                   />
                   {spectateError && (
                     <p className="text-sm text-red-500 dark:text-red-400">{spectateError}</p>

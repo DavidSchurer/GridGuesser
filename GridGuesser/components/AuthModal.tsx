@@ -91,7 +91,7 @@ export default function AuthModal({ isOpen, onClose, defaultMode = "login" }: Au
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-4" autoComplete="off">
           {mode === "signup" && (
             <div>
               <label htmlFor="username" className="block text-sm font-medium text-gray-300 mb-1">
@@ -107,6 +107,7 @@ export default function AuthModal({ isOpen, onClose, defaultMode = "login" }: Au
                 minLength={3}
                 className="w-full px-3 py-2 bg-gray-800 border border-gray-600 text-white rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent placeholder-gray-500"
                 placeholder="Enter your username"
+                autoComplete="off"
               />
             </div>
           )}
@@ -124,6 +125,7 @@ export default function AuthModal({ isOpen, onClose, defaultMode = "login" }: Au
               required
               className="w-full px-3 py-2 bg-gray-800 border border-gray-600 text-white rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent placeholder-gray-500"
               placeholder="Enter your email"
+              autoComplete="off"
             />
           </div>
 
@@ -141,6 +143,7 @@ export default function AuthModal({ isOpen, onClose, defaultMode = "login" }: Au
               minLength={6}
               className="w-full px-3 py-2 bg-gray-800 border border-gray-600 text-white rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent placeholder-gray-500"
               placeholder="Enter your password"
+              autoComplete="off"
             />
           </div>
 
@@ -159,6 +162,7 @@ export default function AuthModal({ isOpen, onClose, defaultMode = "login" }: Au
                 minLength={6}
                 className="w-full px-3 py-2 bg-gray-800 border border-gray-600 text-white rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent placeholder-gray-500"
                 placeholder="Confirm your password"
+                autoComplete="off"
               />
             </div>
           )}
