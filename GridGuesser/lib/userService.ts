@@ -5,8 +5,20 @@ if (typeof __dirname !== 'undefined') {
   dotenv.config({ path: path.join(__dirname, '../.env.local') });
 }
 
-import { docClient, TABLES, PutCommand, GetCommand, UpdateCommand, QueryCommand } from "./dynamodb";
+import { docClient, TABLES, PutCommand, GetCommand, UpdateCommand, QueryCommand, ScanCommand } from "./dynamodb";
 import { User, UserStats, UserSettings } from "./types";
+
+export type LeaderboardFilter = "gamesPlayed" | "winRate" | "bestStreak" | "currentStreak";
+
+export interface LeaderboardEntry {
+  userId: string;
+  username: string;
+  gamesPlayed: number;
+  gamesWon: number;
+  winRate: number;
+  bestStreak: number;
+  currentStreak: number;
+}
 import { randomUUID } from "crypto";
 import bcrypt from "bcryptjs";
 
@@ -300,6 +312,66 @@ export async function updateUserProfile(
   } catch (error) {
     console.error("Error updating user profile:", error);
     return { success: false, error: "Failed to update profile" };
+  }
+}
+
+// Fetch top 10 players for a given leaderboard filter.
+// Uses a projected Scan over the Users table; suitable for MVP volume.
+export async function getLeaderboard(
+  filter: LeaderboardFilter
+): Promise<LeaderboardEntry[]> {
+  try {
+    const command = new ScanCommand({
+      TableName: TABLES.USERS,
+      ProjectionExpression: "userId, username, stats",
+    });
+
+    const response = await docClient.send(command);
+    const items = (response.Items || []) as Array<
+      Pick<User, "userId" | "username" | "stats">
+    >;
+
+    const entries: LeaderboardEntry[] = items
+      .filter((u) => u && u.stats && u.stats.gamesPlayed > 0)
+      .map((u) => {
+        const s = u.stats;
+        const winRate = s.gamesPlayed > 0 ? (s.gamesWon / s.gamesPlayed) * 100 : 0;
+        return {
+          userId: u.userId,
+          username: u.username,
+          gamesPlayed: s.gamesPlayed,
+          gamesWon: s.gamesWon,
+          winRate,
+          bestStreak: s.bestStreak,
+          currentStreak: s.currentStreak,
+        };
+      });
+
+    // Tie-breakers chosen to feel natural for each filter.
+    const cmp: Record<LeaderboardFilter, (a: LeaderboardEntry, b: LeaderboardEntry) => number> = {
+      gamesPlayed: (a, b) =>
+        b.gamesPlayed - a.gamesPlayed ||
+        b.gamesWon - a.gamesWon ||
+        a.username.localeCompare(b.username),
+      winRate: (a, b) =>
+        b.winRate - a.winRate ||
+        b.gamesPlayed - a.gamesPlayed ||
+        a.username.localeCompare(b.username),
+      bestStreak: (a, b) =>
+        b.bestStreak - a.bestStreak ||
+        b.gamesWon - a.gamesWon ||
+        a.username.localeCompare(b.username),
+      currentStreak: (a, b) =>
+        b.currentStreak - a.currentStreak ||
+        b.bestStreak - a.bestStreak ||
+        a.username.localeCompare(b.username),
+    };
+
+    entries.sort(cmp[filter]);
+    return entries.slice(0, 10);
+  } catch (error) {
+    console.error("Error fetching leaderboard:", error);
+    return [];
   }
 }
 

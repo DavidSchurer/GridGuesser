@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import UserProfile from "../components/UserProfile";
+import Leaderboard from "../components/Leaderboard";
 import CategorySelector from "../components/CategorySelector";
 import GameModeSelector from "../components/GameModeSelector";
 import { useAuth } from "../lib/authContext";
@@ -210,8 +211,9 @@ export default function Home() {
 
   return (
     <main className="min-h-screen flex items-center justify-center p-8">
-      <div className="absolute top-4 right-4">
+      <div className="absolute top-4 right-4 flex flex-col items-end gap-2">
         <UserProfile />
+        <Leaderboard />
       </div>
       
       <div className="max-w-2xl w-full">
