@@ -108,7 +108,50 @@ npm run test             # Run unit tests
 npm run test:watch       # Run tests in watch mode
 npm run test:coverage    # Generate test coverage report
 npm run test:e2e         # Run end-to-end tests with Playwright
+npm run test:e2e:smoke   # Run the smoke E2E suite (e2e/smoke/*.spec.ts)
 ```
+
+## End-to-End Smoke Tests
+
+The Playwright suite in `e2e/smoke/` covers the six "if any of these break, the
+site is broken" flows: auth round-trip, multiplayer room join, real-time tile
+sync, correct-guess win condition, wrong-guess turn flip, and graceful handling
+of bad URLs.
+
+### Test-mode fixture
+
+The win-condition test (`04-correct-guess`) needs a deterministic answer to
+type into the guess input. The server checks `GRIDGUESSER_TEST_MODE=1` and, when
+set, swaps live Google Custom Search for a fixed pool of local SVGs in
+`public/images/` (`eiffel-tower.svg`, `big-ben.svg`, `colosseum.svg`,
+`taj-mahal.svg`). The MD5 hashes of those URLs are mapped to known answer
+strings in `e2e/fixtures/game.ts`.
+
+### Running the smoke suite
+
+Prerequisites: a valid `.env.local` with AWS credentials (DynamoDB) and a
+local Redis instance reachable on the default URL. The Playwright config's
+`webServer` block auto-starts both `npm run dev` and `npm run server` (with the
+test-mode env var injected), so the actual command is simply:
+
+```bash
+npm run test:e2e:smoke
+```
+
+If you prefer to start the servers manually (e.g. to watch logs), set the env
+var yourself before booting the backend:
+
+```bash
+# Terminal 1: frontend
+npm run dev
+
+# Terminal 2: backend with fixture mode
+GRIDGUESSER_TEST_MODE=1 npm run server
+
+# Terminal 3: tests
+npm run test:e2e:smoke
+```
+
 
 ## Project Structure
 

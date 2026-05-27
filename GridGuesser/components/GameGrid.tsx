@@ -156,7 +156,12 @@ export default function GameGrid({
   };
 
   return (
-    <div className={compact ? "w-full max-w-[min(360px,30vw)] mx-auto" : "w-full max-w-[600px]"}>
+    <div
+      data-testid="game-grid"
+      data-image-hash={imageHash}
+      data-is-opponent-grid={String(isOpponentGrid)}
+      className={compact ? "w-full max-w-[min(360px,30vw)] mx-auto" : "w-full max-w-[600px]"}
+    >
       <div 
         className={`grid-container ${compact ? "compact" : ""}`}
         onMouseLeave={handleGridMouseLeave}
@@ -174,6 +179,9 @@ export default function GameGrid({
           return (
             <motion.div
               key={`${imageHash}-tile-${index}`}
+              data-testid={`tile-${index}`}
+              data-revealed={String(isRevealed)}
+              data-clickable={String(isClickable)}
               onClick={() => handleTileClick(index)}
               onMouseEnter={() => handleTileHover(index)}
               whileHover={isClickable && !reveal2x2Mode && !peekMode && !revealLineMode ? { scale: 1.05, zIndex: 10 } : {}}

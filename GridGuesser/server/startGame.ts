@@ -11,7 +11,7 @@ import {
   CategoryKey,
 } from "../lib/googleImagesApi";
 import imagesData from "../lib/images.json";
-import type { ImageMetadata } from "../lib/types";
+import type { ImageMetadata, DynamicImageMetadata } from "../lib/types";
 
 const staticImages: ImageMetadata[] = imagesData as ImageMetadata[];
 
@@ -20,6 +20,32 @@ function getTwoRandomImages(): [ImageMetadata, ImageMetadata] {
     return [staticImages[0], staticImages[1]];
   }
   return [staticImages[0], staticImages[0]];
+}
+
+// ─── Test-mode fixtures ─────────────────────────────────────────────────
+// When GRIDGUESSER_TEST_MODE=1, the image-fetch step is replaced with this
+// deterministic pool of local SVGs. This lets the E2E smoke suite verify
+// the win-condition flow without depending on Google Custom Search or
+// network access. Titles must match the file contents semantically so the
+// fuzzy guess matcher accepts them.
+const TEST_MODE_FIXTURE_POOL: DynamicImageMetadata[] = [
+  { url: "images/eiffel-tower.svg",      thumbnailUrl: "", title: "Eiffel Tower",      searchTerm: "test", category: "landmarks" },
+  { url: "images/big-ben.svg",           thumbnailUrl: "", title: "Big Ben",           searchTerm: "test", category: "landmarks" },
+  { url: "images/colosseum.svg",         thumbnailUrl: "", title: "Colosseum",         searchTerm: "test", category: "landmarks" },
+  { url: "images/taj-mahal.svg",         thumbnailUrl: "", title: "Taj Mahal",         searchTerm: "test", category: "landmarks" },
+];
+
+function isTestMode(): boolean {
+  return process.env.GRIDGUESSER_TEST_MODE === "1";
+}
+
+function getTestModeFixtures(count: number): DynamicImageMetadata[] {
+  if (count < 2 || count > TEST_MODE_FIXTURE_POOL.length) {
+    throw new Error(
+      `Test-mode fixture pool has ${TEST_MODE_FIXTURE_POOL.length} images; requested ${count}`
+    );
+  }
+  return TEST_MODE_FIXTURE_POOL.slice(0, count);
 }
 
 export type FetchImagesOptions = {
@@ -47,7 +73,18 @@ export async function fetchImagesAndStartGame(
   let retryCount = 0;
   const maxRetries = 3;
 
-  while (retryCount < maxRetries) {
+  if (isTestMode()) {
+    console.log(
+      `GRIDGUESSER_TEST_MODE=1 — using local SVG fixtures (${imageCount} images), skipping Google Image Search`
+    );
+    const fixtures = getTestModeFixtures(imageCount);
+    updateResult = await updateGameImages(roomId, fixtures);
+    if (!updateResult.success) {
+      console.error(`Test-mode fixture install failed: ${updateResult.error}`);
+    }
+  }
+
+  while (!isTestMode() && retryCount < maxRetries) {
     try {
       let fetchedImages: unknown[];
 

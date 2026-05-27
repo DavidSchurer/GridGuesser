@@ -18,6 +18,7 @@ export default function UserProfile() {
       <>
         <div className="flex items-center gap-2">
           <button
+            data-testid="userprofile-login-btn"
             onClick={() => setShowAuthModal(true)}
             className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors font-medium"
           >
@@ -33,8 +34,9 @@ export default function UserProfile() {
   }
 
   return (
-    <div className="relative">
+    <div className="relative" data-testid="userprofile-loggedin">
       <button
+        data-testid="userprofile-menu-toggle"
         onClick={() => setShowProfileMenu(!showProfileMenu)}
         className="flex items-center gap-3 px-4 py-2 bg-white/10 backdrop-blur-sm border-2 border-white/20 rounded-lg hover:border-blue-500 hover:bg-white/20 transition-all"
       >
@@ -42,7 +44,7 @@ export default function UserProfile() {
           {user.username.charAt(0).toUpperCase()}
         </div>
         <div className="text-left">
-          <div className="text-sm font-bold text-white">{user.username}</div>
+          <div data-testid="userprofile-username" className="text-sm font-bold text-white">{user.username}</div>
           <div className="text-xs text-blue-300 font-medium">
             {user.stats.gamesWon}W / {user.stats.gamesLost}L
           </div>
@@ -93,6 +95,7 @@ export default function UserProfile() {
 
             <div className="p-3">
               <button
+                data-testid="userprofile-logout-btn"
                 onClick={() => {
                   logout();
                   setShowProfileMenu(false);

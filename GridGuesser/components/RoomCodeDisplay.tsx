@@ -30,7 +30,7 @@ export default function RoomCodeDisplay({ roomCode }: RoomCodeDisplayProps) {
   };
 
   return (
-    <div className="flex flex-col sm:flex-row items-stretch gap-2 text-sm">
+    <div data-testid="room-code-display" data-room-code={roomCode} className="flex flex-col sm:flex-row items-stretch gap-2 text-sm">
       {/* Invite Link */}
       <button
         onClick={copyInviteLink}

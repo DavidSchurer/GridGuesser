@@ -86,12 +86,15 @@ export default function AuthModal({ isOpen, onClose, defaultMode = "login" }: Au
         </div>
 
         {error && (
-          <div className="mb-4 p-3 bg-red-900/30 border border-red-500/50 text-red-300 rounded">
+          <div
+            data-testid="auth-error"
+            className="mb-4 p-3 bg-red-900/30 border border-red-500/50 text-red-300 rounded"
+          >
             {error}
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-4" autoComplete="off">
+        <form onSubmit={handleSubmit} className="space-y-4" autoComplete="off" data-testid="auth-form" data-mode={mode}>
           {mode === "signup" && (
             <div>
               <label htmlFor="username" className="block text-sm font-medium text-gray-300 mb-1">
@@ -101,6 +104,7 @@ export default function AuthModal({ isOpen, onClose, defaultMode = "login" }: Au
                 type="text"
                 id="username"
                 name="username"
+                data-testid="auth-username"
                 value={formData.username}
                 onChange={handleChange}
                 required
@@ -120,6 +124,7 @@ export default function AuthModal({ isOpen, onClose, defaultMode = "login" }: Au
               type="email"
               id="email"
               name="email"
+              data-testid="auth-email"
               value={formData.email}
               onChange={handleChange}
               required
@@ -137,6 +142,7 @@ export default function AuthModal({ isOpen, onClose, defaultMode = "login" }: Au
               type="password"
               id="password"
               name="password"
+              data-testid="auth-password"
               value={formData.password}
               onChange={handleChange}
               required
@@ -156,6 +162,7 @@ export default function AuthModal({ isOpen, onClose, defaultMode = "login" }: Au
                 type="password"
                 id="confirmPassword"
                 name="confirmPassword"
+                data-testid="auth-confirm"
                 value={formData.confirmPassword}
                 onChange={handleChange}
                 required
@@ -169,6 +176,7 @@ export default function AuthModal({ isOpen, onClose, defaultMode = "login" }: Au
 
           <button
             type="submit"
+            data-testid="auth-submit"
             disabled={loading}
             className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 disabled:bg-gray-700 disabled:cursor-not-allowed transition-colors font-medium"
           >
@@ -181,6 +189,7 @@ export default function AuthModal({ isOpen, onClose, defaultMode = "login" }: Au
             {mode === "login" ? "Don\u2019t have an account? " : "Already have an account? "}
             <button
               onClick={switchMode}
+              data-testid="auth-switch-mode"
               className="text-blue-400 hover:text-blue-300 font-medium transition-colors"
             >
               {mode === "login" ? "Sign Up" : "Login"}

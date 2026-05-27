@@ -920,12 +920,13 @@ export default function GameRoomPage() {
   if (error) {
     return (
       <main className="min-h-screen flex items-center justify-center p-8">
-        <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl p-8 max-w-md text-center">
+        <div data-testid="error-page" className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl p-8 max-w-md text-center">
           <h2 className="text-2xl font-bold text-red-600 dark:text-red-400 mb-4">
             Error
           </h2>
-          <p className="text-gray-600 dark:text-gray-400 mb-6">{error}</p>
+          <p data-testid="error-page-message" className="text-gray-600 dark:text-gray-400 mb-6">{error}</p>
           <button
+            data-testid="error-page-back"
             onClick={() => router.push("/")}
             className="px-6 py-3 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white rounded-lg font-semibold transition-all duration-200"
           >
@@ -957,6 +958,7 @@ export default function GameRoomPage() {
 
             {!user && (
               <input
+                data-testid="join-prompt-name"
                 type="text"
                 value={joinName}
                 onChange={(e) => setJoinName(e.target.value.slice(0, 20))}
@@ -970,6 +972,7 @@ export default function GameRoomPage() {
             )}
 
             <button
+              data-testid="join-prompt-submit"
               onClick={handleJoinSubmit}
               disabled={!user && joinName.trim().length === 0}
               className="w-full py-4 px-6 bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 text-white rounded-xl font-semibold text-lg transition-all duration-200 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"

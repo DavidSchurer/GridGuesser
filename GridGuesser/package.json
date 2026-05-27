@@ -16,7 +16,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:e2e:smoke": "playwright test e2e/smoke"
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.940.0",

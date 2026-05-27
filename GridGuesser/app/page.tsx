@@ -253,6 +253,7 @@ export default function Home() {
                 />
                 
                 <button
+                  data-testid="mode-continue-btn"
                   onClick={handleModeSelected}
                   className="w-full mt-6 py-4 px-6 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white rounded-xl font-semibold text-lg transition-all duration-200 transform hover:scale-105"
                 >
@@ -320,6 +321,7 @@ export default function Home() {
                 )}
 
                 <button
+                  data-testid="category-continue-btn"
                   onClick={handleCategorySelected}
                   disabled={
                     isValidatingCategory ||
@@ -351,6 +353,7 @@ export default function Home() {
                 
                 {!user && (
                   <input
+                    data-testid="home-name-input"
                     type="text"
                     value={playerName}
                     onChange={(e) => setPlayerName(e.target.value.slice(0, 20))}
@@ -364,6 +367,7 @@ export default function Home() {
                 )}
                 
                 <button
+                  data-testid="home-name-submit"
                   onClick={handleNameSubmit}
                   disabled={!user && playerName.trim().length === 0}
                   className="w-full py-4 px-6 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white rounded-xl font-semibold text-lg transition-all duration-200 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
@@ -381,6 +385,7 @@ export default function Home() {
                 </h2>
                 
                 <button
+                  data-testid="home-create-btn"
                   onClick={handleCreateClick}
                   disabled={isCreating}
                   className="w-full py-4 px-6 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white rounded-xl font-semibold text-lg transition-all duration-200 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
@@ -390,6 +395,7 @@ export default function Home() {
 
                 <button
                   type="button"
+                  data-testid="home-vs-ai-btn"
                   onClick={handleVsAiClick}
                   disabled={isCreating}
                   className="w-full py-4 px-6 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white rounded-xl font-semibold text-lg transition-all duration-200 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
@@ -413,6 +419,7 @@ export default function Home() {
                     Join with Room Code
                   </label>
                   <input
+                    data-testid="home-join-input"
                     type="text"
                     value={roomCode}
                     onChange={(e) => setRoomCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
@@ -422,6 +429,7 @@ export default function Home() {
                     autoComplete="off"
                   />
                   <button
+                    data-testid="home-join-btn"
                     onClick={handleJoinClick}
                     disabled={roomCode.length !== 6}
                     className="w-full py-4 px-6 bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 text-white rounded-xl font-semibold text-lg transition-all duration-200 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
@@ -435,6 +443,7 @@ export default function Home() {
                     <span aria-hidden>&#128065;</span> Spectate a Game
                   </label>
                   <input
+                    data-testid="home-spectate-input"
                     type="text"
                     value={spectateCode}
                     onChange={(e) => {
@@ -448,9 +457,10 @@ export default function Home() {
                     autoComplete="off"
                   />
                   {spectateError && (
-                    <p className="text-sm text-red-500 dark:text-red-400">{spectateError}</p>
+                    <p data-testid="home-spectate-error" className="text-sm text-red-500 dark:text-red-400">{spectateError}</p>
                   )}
                   <button
+                    data-testid="home-spectate-btn"
                     onClick={handleSpectateClick}
                     disabled={spectateCode.length < 4 || isValidatingSpectate}
                     className="w-full py-4 px-6 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white rounded-xl font-semibold text-lg transition-all duration-200 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"

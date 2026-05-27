@@ -66,7 +66,13 @@ export default function GameStatus({
   const status = getStatusMessage();
 
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 mb-6">
+    <div
+      data-testid="game-status-banner"
+      data-state={gameState}
+      data-winner={winner !== undefined ? String(winner) : ""}
+      data-is-my-turn={String(isMyTurn)}
+      className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 mb-6"
+    >
       <div className="flex items-center justify-center">
         <AnimatePresence mode="wait">
           <motion.h2
