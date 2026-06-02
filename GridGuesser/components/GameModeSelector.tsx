@@ -17,8 +17,10 @@ export default function GameModeSelector({
   onMaxPlayersChange,
 }: GameModeSelectorProps) {
   return (
-    <div className="space-y-4">
+    <div className="space-y-4" data-testid="mode-selector" data-selected-mode={selectedMode}>
       <button
+        data-testid="mode-option-normal"
+        data-selected={selectedMode === "normal"}
         onClick={() => onModeChange("normal")}
         className={`
           w-full p-5 rounded-xl border-2 transition-all duration-200 text-left
@@ -44,6 +46,8 @@ export default function GameModeSelector({
       </button>
 
       <button
+        data-testid="mode-option-royale"
+        data-selected={selectedMode === "royale"}
         onClick={() => onModeChange("royale")}
         className={`
           w-full p-5 rounded-xl border-2 transition-all duration-200 text-left
@@ -69,7 +73,11 @@ export default function GameModeSelector({
       </button>
 
       {selectedMode === "royale" && (
-        <div className="p-4 bg-orange-50 dark:bg-orange-900/10 border border-orange-200 dark:border-orange-800 rounded-xl animate-slide-up">
+        <div
+          data-testid="royale-player-count-picker"
+          data-selected-count={maxPlayers}
+          className="p-4 bg-orange-50 dark:bg-orange-900/10 border border-orange-200 dark:border-orange-800 rounded-xl animate-slide-up"
+        >
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
             Number of Players
           </label>
@@ -77,6 +85,8 @@ export default function GameModeSelector({
             {[3, 4].map((count) => (
               <button
                 key={count}
+                data-testid={`royale-player-count-${count}`}
+                data-selected={maxPlayers === count}
                 onClick={() => onMaxPlayersChange(count)}
                 className={`
                   flex-1 py-3 px-4 rounded-lg font-semibold text-lg transition-all duration-200

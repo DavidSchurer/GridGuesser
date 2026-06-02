@@ -49,6 +49,7 @@ export default function InviteToWatchModal({ isOpen, onClose, spectatorCode, wat
           onClick={onClose}
         >
           <motion.div
+            data-testid="invite-modal"
             initial={{ scale: 0.85, opacity: 0, y: 30 }}
             animate={{ scale: 1, opacity: 1, y: 0 }}
             exit={{ scale: 0.85, opacity: 0, y: 30 }}
@@ -80,7 +81,11 @@ export default function InviteToWatchModal({ isOpen, onClose, spectatorCode, wat
                   <p className="text-xs uppercase tracking-widest text-amber-700 dark:text-amber-300 mb-2 font-semibold">
                     Spectator Code
                   </p>
-                  <p className="font-mono font-bold text-4xl tracking-[0.3em] text-amber-900 dark:text-amber-100 select-all">
+                  <p
+                    data-testid="invite-spectator-code"
+                    data-code={spectatorCode}
+                    className="font-mono font-bold text-4xl tracking-[0.3em] text-amber-900 dark:text-amber-100 select-all"
+                  >
                     {spectatorCode}
                   </p>
                 </div>
@@ -100,7 +105,11 @@ export default function InviteToWatchModal({ isOpen, onClose, spectatorCode, wat
                   </button>
                 </div>
 
-                <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700 text-center text-sm text-gray-600 dark:text-gray-400">
+                <div
+                  data-testid="invite-watcher-count"
+                  data-count={watcherCount}
+                  className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700 text-center text-sm text-gray-600 dark:text-gray-400"
+                >
                   <span aria-hidden>&#128065;</span>{" "}
                   {watcherCount === 0
                     ? "No one watching yet"

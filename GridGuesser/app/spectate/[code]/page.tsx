@@ -214,13 +214,13 @@ export default function SpectatePage() {
 
   if (error) {
     return (
-      <main className="min-h-screen flex items-center justify-center p-8">
+      <main data-testid="spectate-error" className="min-h-screen flex items-center justify-center p-8">
         <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl p-8 max-w-md text-center">
           <div className="text-5xl mb-3" aria-hidden>
             &#9888;
           </div>
           <h2 className="text-2xl font-bold text-red-600 dark:text-red-400 mb-3">Can&apos;t Spectate</h2>
-          <p className="text-gray-600 dark:text-gray-400 mb-6">{error}</p>
+          <p data-testid="spectate-error-message" className="text-gray-600 dark:text-gray-400 mb-6">{error}</p>
           <button
             onClick={() => router.push("/")}
             className="px-6 py-3 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white rounded-lg font-semibold transition-all duration-200"
@@ -234,7 +234,7 @@ export default function SpectatePage() {
 
   if (!room || !joined) {
     return (
-      <main className="min-h-screen flex items-center justify-center p-8">
+      <main data-testid="spectate-loading" className="min-h-screen flex items-center justify-center p-8">
         <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl p-8 max-w-md text-center">
           <div className="animate-pulse-slow mb-4 flex justify-center">
             <Icon name="gamepad" size={64} className="text-amber-500" />
@@ -253,7 +253,12 @@ export default function SpectatePage() {
   const p1 = room.players[1];
 
   return (
-    <main className="min-h-screen p-4 md:p-8">
+    <main
+      data-testid="spectate-root"
+      data-game-state={room.gameState}
+      data-game-mode={room.gameMode}
+      className="min-h-screen p-4 md:p-8"
+    >
       <div className="max-w-[1800px] mx-auto">
         {/* Header */}
         <div className="mb-6 flex justify-between items-center gap-2">
@@ -273,10 +278,18 @@ export default function SpectatePage() {
             </p>
           </div>
           <div className="flex flex-col items-end gap-1 shrink-0">
-            <span className="px-3 py-1 bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-200 rounded-lg text-xs font-mono font-bold">
+            <span
+              data-testid="spectate-code"
+              data-code={code}
+              className="px-3 py-1 bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-200 rounded-lg text-xs font-mono font-bold"
+            >
               {code}
             </span>
-            <span className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1">
+            <span
+              data-testid="spectate-watcher-count"
+              data-count={room.spectatorCount}
+              className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1"
+            >
               <span aria-hidden>&#128065;</span> {room.spectatorCount} watching
             </span>
           </div>
@@ -346,7 +359,16 @@ export default function SpectatePage() {
                 const affordable = POWER_UPS.filter((p) => points >= p.cost);
 
                 return (
-                  <div key={player.id} className="flex flex-col items-center">
+                  <div
+                    key={player.id}
+                    data-testid={`spectate-grid-${idx}`}
+                    data-player-index={idx}
+                    data-player-name={player.name}
+                    data-masked-name={masked}
+                    data-revealed-count={(room.revealedTiles[idx] || []).length}
+                    data-image-hash={room.imageHashes[idx] || ""}
+                    className="flex flex-col items-center"
+                  >
                     <h3 className="text-lg font-semibold mb-3 text-gray-800 dark:text-gray-100 flex items-center gap-2">
                       <span className="text-amber-600 dark:text-amber-400">{player.name}</span>
                       {room.currentTurn === idx && room.gameState === "playing" && (

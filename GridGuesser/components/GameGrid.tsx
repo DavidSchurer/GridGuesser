@@ -182,6 +182,7 @@ export default function GameGrid({
               data-testid={`tile-${index}`}
               data-revealed={String(isRevealed)}
               data-clickable={String(isClickable)}
+              data-peek={String(isPeeking)}
               onClick={() => handleTileClick(index)}
               onMouseEnter={() => handleTileHover(index)}
               whileHover={isClickable && !reveal2x2Mode && !peekMode && !revealLineMode ? { scale: 1.05, zIndex: 10 } : {}}

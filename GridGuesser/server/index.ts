@@ -35,7 +35,7 @@ import {
   getRoomBySpectatorCode,
 } from "../lib/gameRoomService";
 import { fuzzyMatchStrings } from "../lib/fuzzyMatch";
-import { fetchImagesAndStartGame } from "./startGame";
+import { fetchImagesAndStartGame, isTestMode, getTestModeFixtures } from "./startGame";
 import { scheduleAiTurn } from "./aiOpponent";
 import {
   applyRevealTileNormal,
@@ -1294,8 +1294,21 @@ io.on("connection", (socket: Socket) => {
         let updateResult: any;
         let retryCount = 0;
         const maxRetries = 3;
-        
-        while (retryCount < maxRetries) {
+
+        // Test mode: install deterministic SVG fixtures instead of hitting
+        // Google Image Search, mirroring fetchImagesAndStartGame so rematch
+        // games stay in the fixture-answer map.
+        if (isTestMode()) {
+          console.log(
+            `GRIDGUESSER_TEST_MODE=1 — rematch using local SVG fixtures (${imageCount} images)`
+          );
+          updateResult = await updateGameImages(roomId, getTestModeFixtures(imageCount));
+          if (!updateResult.success) {
+            console.error(`Test-mode rematch fixture install failed: ${updateResult.error}`);
+          }
+        }
+
+        while (!isTestMode() && retryCount < maxRetries) {
           try {
             if (category === 'custom' && customQuery) {
               if (imageCount > 2) {

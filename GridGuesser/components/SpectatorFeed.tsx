@@ -73,7 +73,11 @@ function bgFor(type: FeedEventType): string {
 
 export default function SpectatorFeed({ events }: SpectatorFeedProps) {
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-4 h-full max-h-[70vh] flex flex-col">
+    <div
+      data-testid="spectate-feed"
+      data-event-count={events.length}
+      className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-4 h-full max-h-[70vh] flex flex-col"
+    >
       <h3 className="text-sm font-bold uppercase tracking-wide text-gray-700 dark:text-gray-200 mb-3 flex items-center gap-2">
         <span aria-hidden>&#128240;</span> Live Feed
       </h3>
@@ -94,6 +98,9 @@ export default function SpectatorFeed({ events }: SpectatorFeedProps) {
               return (
                 <motion.div
                   key={ev.id}
+                  data-testid="spectate-feed-event"
+                  data-event-type={ev.type}
+                  data-player-index={ev.playerIndex ?? ""}
                   layout
                   initial={{ opacity: 0, y: -10, scale: 0.95 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}

@@ -54,7 +54,14 @@ export default function PhaseTimer({ phase, phaseEndTime, round, hasActed, compa
     : 0;
 
   return (
-    <div className={`w-full rounded-xl bg-gradient-to-r ${bgColor} shadow-lg ${compact ? 'p-3' : 'p-4'}`}>
+    <div
+      data-testid="royale-phase-indicator"
+      data-phase={phase}
+      data-round={round}
+      data-has-acted={hasActed}
+      data-seconds-left={secondsLeft}
+      className={`w-full rounded-xl bg-gradient-to-r ${bgColor} shadow-lg ${compact ? 'p-3' : 'p-4'}`}
+    >
       <div className={`flex items-center justify-between text-white ${compact ? 'mb-1' : 'mb-2'}`}>
         <div>
           <div className={`font-medium uppercase tracking-wider opacity-80 ${compact ? 'text-[10px]' : 'text-xs'}`}>

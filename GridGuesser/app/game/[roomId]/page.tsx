@@ -39,6 +39,7 @@ export default function GameRoomPage() {
   const [socket, setSocket] = useState<ReturnType<typeof connectSocket> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [opponentConnected, setOpponentConnected] = useState(false);
+  const [opponentRecentlyReconnected, setOpponentRecentlyReconnected] = useState(false);
   const [lastRevealedTile, setLastRevealedTile] = useState<number | null>(null);
   const [notification, setNotification] = useState<string | null>(null);
   const [selectedPowerUp, setSelectedPowerUp] = useState<string | null>(null);
@@ -714,6 +715,8 @@ export default function GameRoomPage() {
     // Listen for player reconnection
     socketInstance.on("player-reconnected", (data: { playerIndex: number; message: string }) => {
       setOpponentConnected(true);
+      setOpponentRecentlyReconnected(true);
+      setTimeout(() => setOpponentRecentlyReconnected(false), 4000);
       showNotification(data.message);
     });
 
@@ -1077,7 +1080,16 @@ export default function GameRoomPage() {
   };
 
   return (
-    <main className={`min-h-screen ${isRoyale ? 'p-3 md:p-4' : 'p-4 md:p-8'}`}>
+    <main
+      data-testid="game-room"
+      data-room-id={roomId}
+      data-game-mode={gameRoom.gameMode}
+      data-category={gameRoom.category || ''}
+      data-custom-query={gameRoom.customQuery || ''}
+      data-vs-ai={String(!!gameRoom.vsAi)}
+      data-max-players={gameRoom.maxPlayers}
+      className={`min-h-screen ${isRoyale ? 'p-3 md:p-4' : 'p-4 md:p-8'}`}
+    >
       <div className="max-w-[1800px] mx-auto">
         {/* Header */}
         <div className={`flex justify-between items-center ${isRoyale ? 'mb-4' : 'mb-6'} gap-2`}>
@@ -1095,6 +1107,7 @@ export default function GameRoomPage() {
           </div>
           <div className="flex flex-col items-end gap-1 shrink-0">
             <button
+              data-testid="invite-spectator-btn"
               onClick={() => setShowInviteWatchModal(true)}
               className="px-3 py-2 bg-amber-100 dark:bg-amber-900/40 hover:bg-amber-200 dark:hover:bg-amber-800/50 text-amber-800 dark:text-amber-200 rounded-lg transition-colors text-sm font-semibold flex items-center gap-1.5 whitespace-nowrap"
               title="Invite a spectator"
@@ -1125,6 +1138,7 @@ export default function GameRoomPage() {
           {notification && (
             <motion.div
               key="notification"
+              data-testid="notification"
               initial={{ opacity: 0, y: -50, scale: 0.8 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: -20, scale: 0.9 }}
@@ -1139,6 +1153,26 @@ export default function GameRoomPage() {
             </motion.div>
           )}
         </AnimatePresence>
+
+        {/* Connection banners (persistent disconnect / brief reconnect) */}
+        {gameRoom?.gameState === 'playing' && !opponentConnected && (
+          <div
+            data-testid="opponent-disconnected-banner"
+            role="status"
+            className="fixed top-4 left-1/2 -translate-x-1/2 z-40 bg-yellow-500 text-black px-6 py-2 rounded-full shadow-lg text-sm font-semibold"
+          >
+            Opponent disconnected — waiting for them to rejoin…
+          </div>
+        )}
+        {opponentRecentlyReconnected && (
+          <div
+            data-testid="opponent-reconnected-banner"
+            role="status"
+            className="fixed top-4 left-1/2 -translate-x-1/2 z-40 bg-green-600 text-white px-6 py-2 rounded-full shadow-lg text-sm font-semibold"
+          >
+            Opponent reconnected!
+          </div>
+        )}
 
         {isRoyale ? (
           /* ═══ ROYALE MODE UI ═══ */
@@ -1194,14 +1228,26 @@ export default function GameRoomPage() {
               )}
 
               {/* Grid Layout: 3 players = row, 4 players = 2x2 */}
-              <div className={`grid gap-4 ${gameRoom.maxPlayers === 3 ? 'grid-cols-1 sm:grid-cols-3' : 'grid-cols-1 sm:grid-cols-2'}`}>
+              <div
+                className={`grid gap-4 ${gameRoom.maxPlayers === 3 ? 'grid-cols-1 sm:grid-cols-3' : 'grid-cols-1 sm:grid-cols-2'}`}
+                data-testid="royale-grids"
+                data-max-players={gameRoom.maxPlayers}
+              >
                 {gameRoom.players.map((p) => {
                   const isMe = p.playerIndex === playerIndex;
                   const canClick = !isMe && isPlayerActive && royalePhase === 'reveal' && !hasActedThisPhase && gameRoom.gameState === 'playing';
                   const placement = royalePlacements.find(pl => pl.playerIndex === p.playerIndex);
 
                   return (
-                    <div key={p.playerIndex} className={`flex flex-col items-center ${isMe ? 'opacity-90' : ''}`}>
+                    <div
+                      key={p.playerIndex}
+                      data-testid={`royale-grid-${p.playerIndex}`}
+                      data-player-index={p.playerIndex}
+                      data-player-name={p.name}
+                      data-is-me={isMe}
+                      data-place={placement?.place ?? ''}
+                      className={`flex flex-col items-center ${isMe ? 'opacity-90' : ''}`}
+                    >
                       <h3 className="text-sm font-semibold mb-1 text-gray-800 dark:text-gray-100 flex items-center gap-2">
                         <span className={isMe ? "text-blue-600 dark:text-blue-400" : "text-purple-600 dark:text-purple-400"}>
                           {isMe ? "Your" : `${p.name}'s`}
@@ -1388,7 +1434,11 @@ export default function GameRoomPage() {
             {/* Revealed answer after game ends */}
             {gameRoom.gameState === 'finished' && revealedImageNames && playerIndex !== null && (
               <div className="mt-4 w-full max-w-[600px]">
-                <div className="bg-green-100 dark:bg-green-900/30 border border-green-300 dark:border-green-700 rounded-lg px-4 py-3 text-center">
+                <div
+                  data-testid={`gameover-answer-${1 - playerIndex}`}
+                  data-answer={revealedImageNames[1 - playerIndex]}
+                  className="bg-green-100 dark:bg-green-900/30 border border-green-300 dark:border-green-700 rounded-lg px-4 py-3 text-center"
+                >
                   <p className="text-xs text-green-600 dark:text-green-400 mb-1 font-medium">Answer</p>
                   <p className="text-2xl font-bold text-green-700 dark:text-green-300 capitalize">{revealedImageNames[1 - playerIndex]}</p>
                 </div>
@@ -1401,7 +1451,16 @@ export default function GameRoomPage() {
                 <div className="bg-gray-100 dark:bg-gray-700/50 rounded-lg px-4 py-3 flex items-center justify-between gap-3">
                   <div className="flex-1 min-w-0">
                     <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Opponent&apos;s Image</p>
-                    <div className="font-mono text-2xl tracking-[0.3em] text-gray-800 dark:text-gray-100 overflow-x-auto whitespace-nowrap">
+                    <div
+                      data-testid="masked-image-name"
+                      data-masked={gameRoom.maskedImageNames[playerIndex] || ''}
+                      data-revealed-count={(gameRoom.maskedImageNames[playerIndex] || '')
+                        .split('')
+                        .filter((ch) => /[a-zA-Z0-9]/.test(ch))
+                        .length}
+                      data-hidden-count={(gameRoom.maskedImageNames[playerIndex] || '').split('').filter((ch) => ch === '_').length}
+                      className="font-mono text-2xl tracking-[0.3em] text-gray-800 dark:text-gray-100 overflow-x-auto whitespace-nowrap"
+                    >
                       {gameRoom.maskedImageNames[playerIndex]?.split("").map((ch, i) => (
                         <span
                           key={i}
@@ -1413,6 +1472,9 @@ export default function GameRoomPage() {
                     </div>
                   </div>
                   <button
+                    data-testid="hint-buy-btn"
+                    data-cost="3"
+                    data-affordable={myPoints >= 3}
                     onClick={() => handleUseHint()}
                     disabled={myPoints < 3 || gameRoom.gameState !== 'playing'}
                     className="shrink-0 px-3 py-2 bg-amber-500 hover:bg-amber-600 disabled:bg-gray-400 disabled:cursor-not-allowed text-white text-sm font-semibold rounded-lg transition-colors flex items-center gap-1.5"
@@ -1443,7 +1505,11 @@ export default function GameRoomPage() {
             {/* Revealed answer after game ends */}
             {gameRoom.gameState === 'finished' && revealedImageNames && playerIndex !== null && (
               <div className="mt-4 w-full max-w-[600px]">
-                <div className="bg-blue-100 dark:bg-blue-900/30 border border-blue-300 dark:border-blue-700 rounded-lg px-4 py-3 text-center">
+                <div
+                  data-testid={`gameover-answer-${playerIndex}`}
+                  data-answer={revealedImageNames[playerIndex]}
+                  className="bg-blue-100 dark:bg-blue-900/30 border border-blue-300 dark:border-blue-700 rounded-lg px-4 py-3 text-center"
+                >
                   <p className="text-xs text-blue-600 dark:text-blue-400 mb-1 font-medium">Answer</p>
                   <p className="text-2xl font-bold text-blue-700 dark:text-blue-300 capitalize">{revealedImageNames[playerIndex]}</p>
                 </div>
@@ -1472,6 +1538,10 @@ export default function GameRoomPage() {
                   className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4"
                 >
                   <motion.div
+                    data-testid="rematch-modal"
+                    data-rematch-requested={rematchRequested}
+                    data-opponent-rematch-requested={opponentRematchRequested}
+                    data-category-picker-open={showCategoryPicker}
                     initial={{ scale: 0.8, opacity: 0, y: 50 }}
                     animate={{ scale: 1, opacity: 1, y: 0 }}
                     exit={{ scale: 0.8, opacity: 0, y: 50 }}
@@ -1494,18 +1564,21 @@ export default function GameRoomPage() {
                       </p>
                       <div className="space-y-3">
                         <button
+                          data-testid="rematch-btn"
                           onClick={() => setShowCategoryPicker(true)}
                           className="w-full px-6 py-3 bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white rounded-lg font-semibold transition-all duration-200"
                         >
                           Rematch
                         </button>
                         <button
+                          data-testid="rematch-decline-btn"
                           onClick={handleDeclineRematch}
                           className="w-full px-6 py-3 bg-gray-700 hover:bg-gray-600 text-white rounded-lg font-semibold transition-all duration-200"
                         >
                           Decline
                         </button>
                         <button
+                          data-testid="rematch-back-home-btn"
                           onClick={() => router.push("/")}
                           className="w-full px-6 py-3 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg font-semibold transition-all duration-200"
                         >
@@ -1521,7 +1594,7 @@ export default function GameRoomPage() {
                       <p className="text-gray-300 text-center mb-4">
                         Pick a category for the rematch:
                       </p>
-                      <div className="mb-4">
+                      <div className="mb-4" data-testid="rematch-category-picker">
                         <CategorySelector
                           selectedCategory={rematchCategory}
                           onCategoryChange={(cat) => {
@@ -1537,6 +1610,7 @@ export default function GameRoomPage() {
                       </div>
                       {rematchError && (
                         <div
+                          data-testid="rematch-error"
                           role="alert"
                           className="mb-4 px-4 py-3 rounded-lg bg-red-900/30 border border-red-700 text-red-300 text-sm font-medium"
                         >
@@ -1545,6 +1619,8 @@ export default function GameRoomPage() {
                       )}
                       <div className="space-y-3">
                         <button
+                          data-testid="rematch-start-btn"
+                          data-category={rematchCategory || gameRoom.category || 'landmarks'}
                           onClick={() => {
                             const cat = rematchCategory || gameRoom.category || 'landmarks';
                             const cq = cat === 'custom' ? rematchCustomQuery : undefined;
@@ -1556,6 +1632,7 @@ export default function GameRoomPage() {
                           Start Rematch
                         </button>
                         <button
+                          data-testid="rematch-back-btn"
                           onClick={() => {
                             setShowCategoryPicker(false);
                             setRematchError(null);
@@ -1571,10 +1648,11 @@ export default function GameRoomPage() {
                   {/* ── STATE 2: I requested, waiting on opponent ── */}
                   {rematchRequested && !opponentRematchRequested && (
                     <>
-                      <p className="text-gray-300 text-center mb-6">
+                      <p data-testid="rematch-status-waiting" className="text-gray-300 text-center mb-6">
                         Waiting for opponent to accept rematch...
                       </p>
                       <button
+                        data-testid="rematch-cancel-btn"
                         onClick={handleDeclineRematch}
                         className="w-full px-6 py-3 bg-gray-700 hover:bg-gray-600 text-white rounded-lg font-semibold transition-all duration-200"
                       >
@@ -1586,7 +1664,12 @@ export default function GameRoomPage() {
                   {/* ── STATE 3: Opponent requested, I haven't accepted yet ── */}
                   {!rematchRequested && opponentRematchRequested && (
                     <>
-                      <p className="text-gray-300 text-center mb-2">
+                      <p
+                        data-testid="rematch-opponent-banner"
+                        data-opponent-category={opponentRematchCategory || ''}
+                        data-opponent-custom-query={opponentRematchCustomQuery || ''}
+                        className="text-gray-300 text-center mb-2"
+                      >
                         Your opponent wants a rematch!
                       </p>
                       {opponentRematchCategory && (
@@ -1601,12 +1684,14 @@ export default function GameRoomPage() {
                       )}
                       <div className="space-y-3">
                         <button
+                          data-testid="rematch-accept-btn"
                           onClick={() => handleRematchRequest()}
                           className="w-full px-6 py-3 bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white rounded-lg font-semibold transition-all duration-200"
                         >
                           Accept Rematch
                         </button>
                         <button
+                          data-testid="rematch-decline-opponent-btn"
                           onClick={handleDeclineRematch}
                           className="w-full px-6 py-3 bg-gray-700 hover:bg-gray-600 text-white rounded-lg font-semibold transition-all duration-200"
                         >
@@ -1618,7 +1703,7 @@ export default function GameRoomPage() {
 
                   {/* ── STATE 4: Both ready ── */}
                   {rematchRequested && opponentRematchRequested && (
-                    <p className="text-green-400 text-center font-semibold">
+                    <p data-testid="rematch-both-ready" className="text-green-400 text-center font-semibold">
                       Both players ready! Starting rematch...
                     </p>
                   )}

@@ -22,7 +22,15 @@ export default function PlayerInfo({
   aiDifficultyLabel,
 }: PlayerInfoProps) {
   return (
-    <div className={`
+    <div
+      data-testid="player-info"
+      data-player-name={playerName}
+      data-points={points}
+      data-active={isActive}
+      data-is-you={isYou}
+      data-is-ai={aiBadge}
+      data-ai-difficulty={aiDifficultyLabel || ''}
+      className={`
       flex items-center rounded-xl transition-all duration-300 shrink-0
       ${compact ? 'px-2 py-1.5 gap-1.5 max-w-[115px]' : 'px-6 py-4 gap-3'}
       ${isActive 

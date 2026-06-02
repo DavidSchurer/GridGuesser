@@ -109,6 +109,7 @@ npm run test:watch       # Run tests in watch mode
 npm run test:coverage    # Generate test coverage report
 npm run test:e2e         # Run end-to-end tests with Playwright
 npm run test:e2e:smoke   # Run the smoke E2E suite (e2e/smoke/*.spec.ts)
+npm run test:e2e:features # Run the Tier-2 feature E2E suite (e2e/features/*.spec.ts)
 ```
 
 ## End-to-End Smoke Tests
@@ -151,6 +152,44 @@ GRIDGUESSER_TEST_MODE=1 npm run server
 # Terminal 3: tests
 npm run test:e2e:smoke
 ```
+
+## Feature E2E Tests
+
+The Playwright suite in `e2e/features/` covers the Tier-2 game-feature flows
+identified in the QA audit (#7–#14):
+
+| Spec                                | Covers                                                                         |
+| ----------------------------------- | ------------------------------------------------------------------------------ |
+| `07-power-ups`                      | All seven power-ups (peek, skip, revealLine, freeze, fog, reveal2x2, nuke)     |
+| `08-hint`                           | Hint purchase reveals one letter and deducts 3 points                          |
+| `09-rematch-same-category`          | Both players accept a rematch and the game resets cleanly                      |
+| `10-rematch-different-category`     | Joiner changes category; host sees the new category before accepting          |
+| `11-disconnect-rejoin`              | Player closes the page mid-game and rejoins via the saved `localStorage` blob |
+| `12-royale`                         | Full 3-player and 4-player Grid Royale games (reveal+guess phases, placements) |
+| `13-vs-ai`                          | Vs-AI mode at easy/medium/hard each produces a visible AI action               |
+| `14-spectator`                      | Spectator code flow, masked names, live feed events                            |
+
+These tests reuse the same `GRIDGUESSER_TEST_MODE` plumbing as the smoke suite,
+with two additional opt-ins that fire only when that env var is set:
+
+- `lib/gameRoomService.ts` seeds every player with **100 starting points** at
+  game start (and on rematch), so the expensive power-ups like `nuke` (30 pts)
+  are affordable without grinding tile reveals.
+- `lib/aiGuessService.ts` short-circuits `suggestGuessWithGemini` to `null`, so
+  the AI uses its deterministic `heuristicGuessFromMasked` fallback. No Gemini
+  API key is required for the AI tests.
+
+Run with:
+
+```bash
+npm run test:e2e:features
+```
+
+The Playwright config's `webServer` block starts the frontend and a
+test-mode-enabled backend automatically. Royale tests are the slowest in the
+suite (~30s each) because they walk every active player through each phase to
+trigger the server's `checkAllPlayersActed` short-circuit instead of waiting
+for the 20-second timer.
 
 
 ## Project Structure

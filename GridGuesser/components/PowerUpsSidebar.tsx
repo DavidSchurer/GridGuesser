@@ -176,7 +176,10 @@ export default function PowerUpsSidebar({
 
       {/* Frozen Warning */}
       {isFrozen && isMyTurn && !disabled && (
-        <div className="bg-cyan-100 dark:bg-cyan-900/30 border border-cyan-400 dark:border-cyan-600 rounded-lg p-3">
+        <div
+          data-testid="powerup-frozen-banner"
+          className="bg-cyan-100 dark:bg-cyan-900/30 border border-cyan-400 dark:border-cyan-600 rounded-lg p-3"
+        >
           <p className="text-sm text-cyan-800 dark:text-cyan-200 text-center font-semibold">
             ❄️ You&apos;re frozen! No power-ups this turn.
           </p>
@@ -194,7 +197,11 @@ export default function PowerUpsSidebar({
 
       {/* Points Display */}
       <div className="space-y-3">
-        <div className="bg-gradient-to-r from-blue-500 to-blue-600 rounded-lg p-4 text-white">
+        <div
+          data-testid="my-points"
+          data-points={myPoints}
+          className="bg-gradient-to-r from-blue-500 to-blue-600 rounded-lg p-4 text-white"
+        >
           <div className="flex items-center justify-between">
             <span className="text-sm font-medium">Your Points</span>
             <span className="text-3xl font-bold">{myPoints}</span>
@@ -234,7 +241,11 @@ export default function PowerUpsSidebar({
 
       {/* Target Picker (Royale) */}
       {selectingTarget && isRoyale && (
-        <div className="bg-orange-100 dark:bg-orange-900/30 border-2 border-orange-400 dark:border-orange-600 rounded-lg p-4 animate-fade-in">
+        <div
+          data-testid="powerup-target-picker"
+          data-powerup-id={selectingTarget}
+          className="bg-orange-100 dark:bg-orange-900/30 border-2 border-orange-400 dark:border-orange-600 rounded-lg p-4 animate-fade-in"
+        >
           <p className="text-sm text-orange-900 dark:text-orange-100 font-bold mb-2">
             Choose target for {powerUps.find(p => p.id === selectingTarget)?.name}:
           </p>
@@ -242,6 +253,8 @@ export default function PowerUpsSidebar({
             {opponents.map((p) => (
               <button
                 key={p.playerIndex}
+                data-testid={`powerup-target-${p.playerIndex}`}
+                data-player-name={p.name}
                 onClick={() => handleTargetSelected(p.playerIndex)}
                 className="w-full px-3 py-2 bg-orange-200 dark:bg-orange-800 hover:bg-orange-300 dark:hover:bg-orange-700 text-orange-900 dark:text-orange-100 rounded-lg font-medium text-sm transition-colors"
               >
@@ -249,7 +262,11 @@ export default function PowerUpsSidebar({
               </button>
             ))}
           </div>
-          <button onClick={handleCancel} className="mt-2 text-xs text-orange-700 dark:text-orange-300 hover:underline">
+          <button
+            data-testid="powerup-target-cancel"
+            onClick={handleCancel}
+            className="mt-2 text-xs text-orange-700 dark:text-orange-300 hover:underline"
+          >
             Cancel
           </button>
         </div>
@@ -289,6 +306,12 @@ export default function PowerUpsSidebar({
               </button>
               <button
                 type="button"
+                data-testid={`powerup-card-${powerUp.id}`}
+                data-cost={powerUp.cost}
+                data-affordable={affordable}
+                data-can-use={canUse}
+                data-selected={isSelected}
+                data-activation={powerUp.activation}
                 onClick={() => handlePowerUpClick(powerUp)}
                 disabled={!canUse}
                 className={`
@@ -347,6 +370,7 @@ export default function PowerUpsSidebar({
       {/* Pagination Controls */}
       <div className="flex items-center justify-between pt-2">
         <button
+          data-testid="powerup-page-prev"
           onClick={() => setPage((p) => Math.max(0, p - 1))}
           disabled={page === 0}
           className={`
@@ -363,11 +387,17 @@ export default function PowerUpsSidebar({
           </svg>
         </button>
 
-        <span className="text-sm text-gray-500 dark:text-gray-400 font-medium">
+        <span
+          data-testid="powerup-page-indicator"
+          data-page={page + 1}
+          data-total-pages={totalPages}
+          className="text-sm text-gray-500 dark:text-gray-400 font-medium"
+        >
           {page + 1} / {totalPages}
         </span>
 
         <button
+          data-testid="powerup-page-next"
           onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
           disabled={page === totalPages - 1}
           className={`

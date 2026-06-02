@@ -290,13 +290,19 @@ export default function Home() {
                 />
 
                 {vsAi && (
-                  <div className="mt-6 space-y-2">
+                  <div
+                    data-testid="ai-difficulty-picker"
+                    data-selected={aiDifficulty}
+                    className="mt-6 space-y-2"
+                  >
                     <p className="text-sm font-medium text-gray-700 dark:text-gray-300">AI difficulty</p>
                     <div className="flex flex-wrap gap-2">
                       {(['easy', 'medium', 'hard'] as const).map((d) => (
                         <button
                           key={d}
                           type="button"
+                          data-testid={`ai-difficulty-${d}`}
+                          data-selected={aiDifficulty === d}
                           onClick={() => setAiDifficulty(d)}
                           className={`px-4 py-2 rounded-lg text-sm font-medium capitalize transition-colors ${
                             aiDifficulty === d

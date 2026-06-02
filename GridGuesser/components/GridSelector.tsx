@@ -20,7 +20,7 @@ export default function GridSelector({
   onSelectTarget,
 }: GridSelectorProps) {
   return (
-    <div className="flex gap-2 flex-wrap">
+    <div className="flex gap-2 flex-wrap" data-testid="royale-grid-selector">
       {players.map((player) => {
         if (player.playerIndex === myPlayerIndex) return null;
 
@@ -31,6 +31,11 @@ export default function GridSelector({
         return (
           <button
             key={player.playerIndex}
+            data-testid={`royale-grid-select-${player.playerIndex}`}
+            data-player-name={player.name}
+            data-placed={isPlaced}
+            data-active={isActive}
+            data-selected={isSelected}
             onClick={() => !isPlaced && onSelectTarget(player.playerIndex)}
             disabled={isPlaced}
             className={`

@@ -35,11 +35,11 @@ const TEST_MODE_FIXTURE_POOL: DynamicImageMetadata[] = [
   { url: "images/taj-mahal.svg",         thumbnailUrl: "", title: "Taj Mahal",         searchTerm: "test", category: "landmarks" },
 ];
 
-function isTestMode(): boolean {
+export function isTestMode(): boolean {
   return process.env.GRIDGUESSER_TEST_MODE === "1";
 }
 
-function getTestModeFixtures(count: number): DynamicImageMetadata[] {
+export function getTestModeFixtures(count: number): DynamicImageMetadata[] {
   if (count < 2 || count > TEST_MODE_FIXTURE_POOL.length) {
     throw new Error(
       `Test-mode fixture pool has ${TEST_MODE_FIXTURE_POOL.length} images; requested ${count}`

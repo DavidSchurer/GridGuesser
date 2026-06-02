@@ -31,15 +31,25 @@ export function generateSpectatorCode(): string {
  */
 export async function getRoomBySpectatorCode(spectatorCode: string): Promise<GameRoom | null> {
   try {
-    const command = new ScanCommand({
-      TableName: GAME_ROOMS_TABLE,
-      FilterExpression: "spectatorCode = :code",
-      ExpressionAttributeValues: { ":code": spectatorCode.toUpperCase() },
-      Limit: 1,
-    });
-    const response = await docClient.send(command);
-    const room = (response.Items?.[0] as GameRoom) || null;
-    return room;
+    // NOTE: `Limit` on a Scan caps the items *evaluated* before the filter is
+    // applied, not the number of matches returned. Using Limit:1 here would
+    // only match when the target room is literally the first item scanned, so
+    // we must page through the table until a match is found.
+    const code = spectatorCode.toUpperCase();
+    let lastEvaluatedKey: Record<string, unknown> | undefined = undefined;
+    do {
+      const command = new ScanCommand({
+        TableName: GAME_ROOMS_TABLE,
+        FilterExpression: "spectatorCode = :code",
+        ExpressionAttributeValues: { ":code": code },
+        ExclusiveStartKey: lastEvaluatedKey,
+      });
+      const response = await docClient.send(command);
+      const room = (response.Items?.[0] as GameRoom) || null;
+      if (room) return room;
+      lastEvaluatedKey = response.LastEvaluatedKey as Record<string, unknown> | undefined;
+    } while (lastEvaluatedKey);
+    return null;
   } catch (error) {
     console.error("Error looking up room by spectator code:", error);
     return null;
@@ -192,31 +202,69 @@ export async function addPlayerToRoom(
   playerName: string,
   socketId: string
 ): Promise<{ success: boolean; room?: GameRoom; error?: string }> {
+  // Atomic, race-safe append. Concurrent joins (multiple players entering the
+  // same room at once — common in Royale) must not clobber one another, so we
+  // read the authoritative state straight from DynamoDB (bypassing the Redis
+  // cache, which can be stale) and append with a ConditionExpression that
+  // pins the current player count. If a concurrent writer beat us to it, the
+  // condition fails and we retry with the fresh count.
+  const MAX_ATTEMPTS = 8;
   try {
-    const room = await getGameRoom(roomId);
-    
-    if (!room) {
-      return { success: false, error: "Room not found" };
+    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+      const fresh = await docClient.send(
+        new GetCommand({ TableName: GAME_ROOMS_TABLE, Key: { roomId } })
+      );
+      const room = (fresh.Item as GameRoom) || null;
+
+      if (!room) {
+        return { success: false, error: "Room not found" };
+      }
+      if (room.players.length >= room.maxPlayers) {
+        return { success: false, error: "Room is full" };
+      }
+      if (room.gameState !== "waiting") {
+        return { success: false, error: "Game already in progress" };
+      }
+
+      const newIndex = room.players.length;
+      const newPlayer = {
+        id: userId || randomUUID(),
+        socketId,
+        playerIndex: newIndex,
+        name: playerName,
+      };
+
+      try {
+        const updated = await docClient.send(
+          new UpdateCommand({
+            TableName: GAME_ROOMS_TABLE,
+            Key: { roomId },
+            UpdateExpression: "SET #players = list_append(#players, :newPlayer)",
+            ConditionExpression: "size(#players) = :expectedLen AND #gameState = :waiting",
+            ExpressionAttributeNames: { "#players": "players", "#gameState": "gameState" },
+            ExpressionAttributeValues: {
+              ":newPlayer": [newPlayer],
+              ":expectedLen": newIndex,
+              ":waiting": "waiting",
+            },
+            ReturnValues: "ALL_NEW",
+          })
+        );
+
+        const updatedRoom = updated.Attributes as GameRoom;
+        await cacheGameRoom(roomId, updatedRoom);
+        return { success: true, room: updatedRoom };
+      } catch (err) {
+        const name = (err as { name?: string })?.name;
+        if (name === "ConditionalCheckFailedException") {
+          // A concurrent join changed the player count; re-read and retry.
+          continue;
+        }
+        throw err;
+      }
     }
 
-    if (room.players.length >= room.maxPlayers) {
-      return { success: false, error: "Room is full" };
-    }
-
-    if (room.gameState !== "waiting") {
-      return { success: false, error: "Game already in progress" };
-    }
-
-    const newIndex = room.players.length;
-    room.players.push({
-      id: userId || randomUUID(),
-      socketId,
-      playerIndex: newIndex,
-      name: playerName,
-    });
-
-    await updateGameRoom(room);
-    return { success: true, room };
+    return { success: false, error: "Room is busy, please try again" };
   } catch (error) {
     console.error("Error adding player to room:", error);
     return { success: false, error: "Failed to add player" };
@@ -308,6 +356,11 @@ export async function updateGameImages(
     }
 
     room.revealedHints = Array.from({ length: room.maxPlayers }, () => []);
+
+    if (process.env.GRIDGUESSER_TEST_MODE === "1") {
+      room.points = Array(room.maxPlayers).fill(100);
+      console.log(`🧪 Test mode: seeded ${room.maxPlayers} players with 100 starting points`);
+    }
 
     const hashes = tileResults.map(r => r.imageHash).join(', ');
     const names = room.imageNames.map(n => `"${n}"`).join(' and ');

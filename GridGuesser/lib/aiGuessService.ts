@@ -169,6 +169,8 @@ export function heuristicGuessFromMasked(
 }
 
 export async function suggestGuessWithGemini(input: SuggestGuessInput): Promise<string | null> {
+  if (process.env.GRIDGUESSER_TEST_MODE === "1") return null;
+
   const key = getApiKey();
   if (!key) return null;
 

@@ -93,6 +93,8 @@ export default function RoyaleLeaderboard({
       className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4"
     >
       <motion.div
+        data-testid="royale-leaderboard"
+        data-placement-count={placements.length}
         initial={{ scale: 0.8, opacity: 0, y: 50 }}
         animate={{ scale: 1, opacity: 1, y: 0 }}
         exit={{ scale: 0.8, opacity: 0, y: 50 }}
@@ -114,6 +116,11 @@ export default function RoyaleLeaderboard({
             return (
               <motion.div
                 key={p.playerIndex}
+                data-testid={`royale-leaderboard-row-${p.place}`}
+                data-place={p.place}
+                data-player-index={p.playerIndex}
+                data-player-name={p.name}
+                data-points={p.points}
                 initial={{ opacity: 0, x: -30 }}
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ delay: i * 0.15 }}

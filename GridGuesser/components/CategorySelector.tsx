@@ -91,8 +91,9 @@ export default function CategorySelector({
   // Initial choice screen: two buttons
   if (mode === 'choose') {
     return (
-      <div className="space-y-3">
+      <div className="space-y-3" data-testid="category-mode-choose">
         <button
+          data-testid="category-select-preset"
           onClick={handleSelectPreset}
           className="w-full p-5 rounded-xl border-2 border-blue-500 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/40 transition-all duration-200 text-left"
         >
@@ -105,6 +106,7 @@ export default function CategorySelector({
         </button>
 
         <button
+          data-testid="category-select-custom"
           onClick={handleSelectCustom}
           className="w-full p-5 rounded-xl border-2 border-purple-500 bg-purple-50 dark:bg-purple-900/20 hover:bg-purple-100 dark:hover:bg-purple-900/40 transition-all duration-200 text-left"
         >
@@ -134,10 +136,17 @@ export default function CategorySelector({
           Select Image Category
         </label>
 
-        <div className="grid grid-cols-2 gap-3">
+        <div
+          className="grid grid-cols-2 gap-3"
+          data-testid="category-preset-grid"
+          data-selected-category={selectedCategory}
+        >
           {categories.map((category) => (
             <button
               key={category.id}
+              data-testid={`category-option-${category.id}`}
+              data-category-id={category.id}
+              data-selected={selectedCategory === category.id}
               onClick={() => onCategoryChange(category.id)}
               className={`
                 p-4 rounded-lg border-2 transition-all duration-200 text-left
@@ -177,6 +186,7 @@ export default function CategorySelector({
 
       <input
         type="text"
+        data-testid="category-custom-input"
         value={localCustomQuery}
         onChange={handleCustomQueryChange}
         placeholder="e.g., 'famous paintings', 'space exploration', 'dinosaurs'..."
