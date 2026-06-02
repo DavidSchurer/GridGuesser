@@ -296,10 +296,17 @@ export default function Achievements() {
     }
   }, []);
 
+  // Prefetch on mount so the button subtitle shows the real completion %
+  useEffect(() => {
+    if (authLoading) return;
+    fetchAchievements();
+  }, [authLoading, user, fetchAchievements]);
+
+  // Refresh when the modal opens (e.g. after unlocking in a game)
   useEffect(() => {
     if (!isOpen || authLoading) return;
     fetchAchievements();
-  }, [isOpen, authLoading, user, fetchAchievements]);
+  }, [isOpen, authLoading, fetchAchievements]);
 
   useEffect(() => {
     if (!isOpen) return;
