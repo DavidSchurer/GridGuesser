@@ -1,7 +1,14 @@
 "use client";
 
-import React, { useEffect, useState, useCallback } from "react";
-import { ACHIEVEMENTS, TOTAL_ACHIEVEMENTS } from "../lib/achievements";
+import React, { useEffect, useState, useCallback, useMemo } from "react";
+import {
+  ACHIEVEMENTS,
+  TOTAL_ACHIEVEMENTS,
+  TIER_ORDER,
+  TIER_LABELS,
+  AchievementTier,
+  AchievementDef,
+} from "../lib/achievements";
 
 const API_URL =
   process.env.NEXT_PUBLIC_API_URL ||
@@ -11,7 +18,13 @@ const API_URL =
 
 type UnlockedMap = Record<string, { unlockedAt: number }>;
 
-// Inline SVGs keyed by AchievementDef.iconKey (the power-up id).
+const TIER_BADGE_CLASSES: Record<AchievementTier, string> = {
+  easy: "bg-emerald-500/20 text-emerald-300 border-emerald-500/30",
+  medium: "bg-amber-500/20 text-amber-300 border-amber-500/30",
+  hard: "bg-rose-500/20 text-rose-300 border-rose-500/30",
+};
+
+// Inline SVGs keyed by AchievementDef.iconKey
 const ACHIEVEMENT_ICONS: Record<string, React.ReactNode> = {
   peek: (
     <svg viewBox="0 0 24 24" fill="currentColor" className="w-7 h-7" aria-hidden="true">
@@ -53,6 +66,113 @@ const ACHIEVEMENT_ICONS: Record<string, React.ReactNode> = {
       <path d="M12 21c-2.5 0-4-2.2-4-5V10c0-2.5 1.8-4.5 4-4.5s4 2 4 4.5v6c0 2.8-1.5 5-4 5Z" />
     </svg>
   ),
+  play: (
+    <svg viewBox="0 0 24 24" fill="currentColor" className="w-7 h-7" aria-hidden="true">
+      <path d="M8 5v14l11-7L8 5Z" />
+    </svg>
+  ),
+  trophy: (
+    <svg viewBox="0 0 24 24" fill="currentColor" className="w-7 h-7" aria-hidden="true">
+      <path d="M5 3h14a1 1 0 0 1 1 1v2a5 5 0 0 1-4 4.9V12a4 4 0 0 1-3 3.87V18h3a1 1 0 0 1 1 1v2H7v-2a1 1 0 0 1 1-1h3v-2.13A4 4 0 0 1 8 12v-1.1A5 5 0 0 1 4 6V4a1 1 0 0 1 1-1Z" />
+    </svg>
+  ),
+  target: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-7 h-7" aria-hidden="true">
+      <circle cx="12" cy="12" r="9" />
+      <circle cx="12" cy="12" r="5" />
+      <circle cx="12" cy="12" r="1.5" fill="currentColor" />
+    </svg>
+  ),
+  bulb: (
+    <svg viewBox="0 0 24 24" fill="currentColor" className="w-7 h-7" aria-hidden="true">
+      <path d="M9 21h6v-1H9v1Zm3-19a7 7 0 0 0-4 12.74V17h8v-2.26A7 7 0 0 0 12 2Z" />
+    </svg>
+  ),
+  robot: (
+    <svg viewBox="0 0 24 24" fill="currentColor" className="w-7 h-7" aria-hidden="true">
+      <path d="M12 2a2 2 0 0 1 2 2v1h3a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h3V4a2 2 0 0 1 2-2Zm-4 8a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Zm8 0a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3ZM9 18h6v2H9v-2Z" />
+    </svg>
+  ),
+  flame: (
+    <svg viewBox="0 0 24 24" fill="currentColor" className="w-7 h-7" aria-hidden="true">
+      <path d="M12 2c1 3 4 4.5 4 8a4 4 0 1 1-8 0c0-3.5 3-5 4-8Zm0 18a6 6 0 0 0 6-6c0-2.5-1.5-4.5-3-6-1 2.5-3 4-3 6a6 6 0 0 0 6 6Z" />
+    </svg>
+  ),
+  crown: (
+    <svg viewBox="0 0 24 24" fill="currentColor" className="w-7 h-7" aria-hidden="true">
+      <path d="M5 16 3 8l4 3 5-6 5 6 4-3-2 8H5Zm2 2h10v2H7v-2Z" />
+    </svg>
+  ),
+  feather: (
+    <svg viewBox="0 0 24 24" fill="currentColor" className="w-7 h-7" aria-hidden="true">
+      <path d="M20 4c-6 0-10 4-12 10l-2 6 6-2c6-2 10-6 10-12 0-1-.3-1.7-.6-2.4L20 4Z" />
+    </svg>
+  ),
+  arsenal: (
+    <svg viewBox="0 0 24 24" fill="currentColor" className="w-7 h-7" aria-hidden="true">
+      <path d="M4 4h4v4H4V4Zm6 0h4v4h-4V4Zm6 0h4v4h-4V4ZM4 10h4v4H4v-4Zm6 0h4v4h-4v-4Zm6 0h4v4h-4v-4ZM4 16h4v4H4v-4Zm6 0h4v4h-4v-4Zm6 0h4v4h-4v-4Z" />
+    </svg>
+  ),
+  grind: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-7 h-7" aria-hidden="true">
+      <path d="M12 6v6l4 2" strokeLinecap="round" />
+      <circle cx="12" cy="12" r="9" />
+    </svg>
+  ),
+  rematch: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-7 h-7" aria-hidden="true">
+      <path d="M4 12a8 8 0 0 1 13.5-5.5M20 12a8 8 0 0 1-13.5 5.5" strokeLinecap="round" />
+      <path d="M20 4v5h-5M4 20v-5h5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  ),
+  lightning: (
+    <svg viewBox="0 0 24 24" fill="currentColor" className="w-7 h-7" aria-hidden="true">
+      <path d="M13 2 3 14h7l-1 8 10-12h-7l1-8Z" />
+    </svg>
+  ),
+  diamond: (
+    <svg viewBox="0 0 24 24" fill="currentColor" className="w-7 h-7" aria-hidden="true">
+      <path d="M12 2 2 9l10 13L22 9 12 2Zm0 4.5 5.5 4.5L12 18 6.5 11 12 6.5Z" />
+    </svg>
+  ),
+  crystal: (
+    <svg viewBox="0 0 24 24" fill="currentColor" className="w-7 h-7" aria-hidden="true">
+      <path d="M12 2 4 9l8 13 8-13-8-7Zm0 5 4.5 4L12 17 7.5 11 12 7Z" />
+    </svg>
+  ),
+  kingCrown: (
+    <svg viewBox="0 0 24 24" fill="currentColor" className="w-7 h-7" aria-hidden="true">
+      <path d="M4 15 2 7l4 4 6-5 6 5 4-4-2 8H4Zm2 3h12v2H6v-2Z" />
+      <circle cx="6" cy="6" r="1.5" />
+      <circle cx="12" cy="4" r="1.5" />
+      <circle cx="18" cy="6" r="1.5" />
+    </svg>
+  ),
+  robotHard: (
+    <svg viewBox="0 0 24 24" fill="currentColor" className="w-7 h-7" aria-hidden="true">
+      <path d="M12 2a2 2 0 0 1 2 2v1h3a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h3V4a2 2 0 0 1 2-2Zm-4 8h1.5v3H8v-3Zm8 0H17v3h1.5v-3ZM9 18h6v2H9v-2Z" />
+    </svg>
+  ),
+  shield: (
+    <svg viewBox="0 0 24 24" fill="currentColor" className="w-7 h-7" aria-hidden="true">
+      <path d="M12 2 4 5v6c0 5 3.4 9.7 8 11 4.6-1.3 8-6 8-11V5l-8-3Z" />
+    </svg>
+  ),
+  coins: (
+    <svg viewBox="0 0 24 24" fill="currentColor" className="w-7 h-7" aria-hidden="true">
+      <ellipse cx="9" cy="8" rx="6" ry="3" />
+      <path d="M3 8v6c0 1.7 2.7 3 6 3s6-1.3 6-3V8" />
+      <ellipse cx="15" cy="14" rx="6" ry="3" />
+      <path d="M9 14v6c0 1.7 2.7 3 6 3s6-1.3 6-3v-6" />
+    </svg>
+  ),
+  podium: (
+    <svg viewBox="0 0 24 24" fill="currentColor" className="w-7 h-7" aria-hidden="true">
+      <rect x="3" y="14" width="5" height="7" rx="1" />
+      <rect x="9.5" y="10" width="5" height="11" rx="1" />
+      <rect x="16" y="16" width="5" height="5" rx="1" />
+    </svg>
+  ),
 };
 
 const LockIcon = () => (
@@ -77,6 +197,66 @@ function formatUnlockDate(ts: number): string {
   } catch {
     return "";
   }
+}
+
+function AchievementCard({
+  achievement: a,
+  entry,
+}: {
+  achievement: AchievementDef;
+  entry?: { unlockedAt: number };
+}) {
+  const isUnlocked = Boolean(entry);
+
+  return (
+    <li
+      data-testid={`achievement-${a.id}`}
+      data-unlocked={isUnlocked ? "true" : "false"}
+      data-tier={a.tier}
+      className={`relative flex items-start gap-3 px-3 py-3 rounded-lg border transition-colors ${
+        isUnlocked ? "bg-blue-600/15 border-blue-500/40" : "bg-white/5 border-white/5"
+      }`}
+    >
+      <div
+        className={`relative w-12 h-12 rounded-full flex items-center justify-center shrink-0 ${
+          isUnlocked
+            ? "bg-gradient-to-br from-blue-600 to-indigo-800 text-white shadow-lg"
+            : "bg-white/10 text-gray-500"
+        }`}
+      >
+        {ACHIEVEMENT_ICONS[a.iconKey] ?? null}
+        {isUnlocked ? (
+          <span className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-emerald-500 text-white flex items-center justify-center border-2 border-gray-900">
+            <CheckIcon />
+          </span>
+        ) : (
+          <span className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-gray-700 text-gray-300 flex items-center justify-center border-2 border-gray-900">
+            <LockIcon />
+          </span>
+        )}
+      </div>
+      <div className="flex-1 min-w-0">
+        <div
+          className={`text-sm font-bold leading-snug break-words ${
+            isUnlocked ? "text-white" : "text-gray-400"
+          }`}
+        >
+          {a.name}
+        </div>
+        <span
+          className={`inline-flex mt-1 mb-0.5 text-[9px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded border ${TIER_BADGE_CLASSES[a.tier]}`}
+        >
+          {TIER_LABELS[a.tier]}
+        </span>
+        <div className="text-xs text-gray-400 leading-snug">{a.description}</div>
+        {isUnlocked && entry && (
+          <div className="text-[10px] uppercase tracking-wider text-blue-300 mt-0.5">
+            Unlocked {formatUnlockDate(entry.unlockedAt)}
+          </div>
+        )}
+      </div>
+    </li>
+  );
 }
 
 export default function Achievements() {
@@ -131,6 +311,21 @@ export default function Achievements() {
   const completionPct =
     TOTAL_ACHIEVEMENTS > 0 ? Math.round((unlockedCount / TOTAL_ACHIEVEMENTS) * 100) : 0;
 
+  const byTier = useMemo(() => {
+    const map: Record<AchievementTier, AchievementDef[]> = {
+      easy: [],
+      medium: [],
+      hard: [],
+    };
+    for (const a of ACHIEVEMENTS) {
+      map[a.tier].push(a);
+    }
+    for (const tier of TIER_ORDER) {
+      map[tier].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+    }
+    return map;
+  }, []);
+
   return (
     <>
       <button
@@ -168,7 +363,7 @@ export default function Achievements() {
           data-testid="achievements-modal"
         >
           <div
-            className="relative w-full max-w-lg bg-gray-900/95 backdrop-blur-md rounded-2xl shadow-2xl border-2 border-white/10 overflow-hidden"
+            className="relative w-full max-w-xl bg-gray-900/95 backdrop-blur-md rounded-2xl shadow-2xl border-2 border-white/10 overflow-hidden"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="px-6 py-5 border-b border-white/10 bg-gradient-to-br from-blue-600/25 to-indigo-800/25 flex items-center justify-between">
@@ -232,60 +427,29 @@ export default function Achievements() {
                   </button>
                 </div>
               ) : (
-                <ul className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {ACHIEVEMENTS.map((a) => {
-                    const entry = unlocked[a.id];
-                    const isUnlocked = Boolean(entry);
+                <div className="space-y-6">
+                  {TIER_ORDER.map((tier) => {
+                    const list = byTier[tier];
+                    const tierUnlocked = list.filter((a) => unlocked[a.id]).length;
                     return (
-                      <li
-                        key={a.id}
-                        data-testid={`achievement-${a.id}`}
-                        data-unlocked={isUnlocked ? "true" : "false"}
-                        className={`relative flex items-center gap-3 px-3 py-3 rounded-lg border transition-colors ${
-                          isUnlocked
-                            ? "bg-blue-600/15 border-blue-500/40"
-                            : "bg-white/5 border-white/5"
-                        }`}
-                      >
-                        <div
-                          className={`relative w-12 h-12 rounded-full flex items-center justify-center shrink-0 ${
-                            isUnlocked
-                              ? "bg-gradient-to-br from-blue-600 to-indigo-800 text-white shadow-lg"
-                              : "bg-white/10 text-gray-500"
-                          }`}
-                        >
-                          {ACHIEVEMENT_ICONS[a.iconKey] ?? null}
-                          {isUnlocked ? (
-                            <span className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-emerald-500 text-white flex items-center justify-center border-2 border-gray-900">
-                              <CheckIcon />
-                            </span>
-                          ) : (
-                            <span className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-gray-700 text-gray-300 flex items-center justify-center border-2 border-gray-900">
-                              <LockIcon />
-                            </span>
-                          )}
+                      <section key={tier} data-testid={`achievements-tier-${tier}`}>
+                        <div className="flex items-center justify-between mb-3">
+                          <h3 className="text-sm font-bold text-white uppercase tracking-wider">
+                            {TIER_LABELS[tier]}
+                          </h3>
+                          <span className="text-xs text-gray-400 font-medium">
+                            {tierUnlocked}/{list.length}
+                          </span>
                         </div>
-                        <div className="flex-1 min-w-0">
-                          <div
-                            className={`text-sm font-bold truncate ${
-                              isUnlocked ? "text-white" : "text-gray-400"
-                            }`}
-                          >
-                            {a.name}
-                          </div>
-                          <div className="text-xs text-gray-400 leading-snug">
-                            {a.description}
-                          </div>
-                          {isUnlocked && (
-                            <div className="text-[10px] uppercase tracking-wider text-blue-300 mt-0.5">
-                              Unlocked {formatUnlockDate(entry.unlockedAt)}
-                            </div>
-                          )}
-                        </div>
-                      </li>
+                        <ul className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          {list.map((a) => (
+                            <AchievementCard key={a.id} achievement={a} entry={unlocked[a.id]} />
+                          ))}
+                        </ul>
+                      </section>
                     );
                   })}
-                </ul>
+                </div>
               )}
             </div>
           </div>

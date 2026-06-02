@@ -62,6 +62,24 @@ export async function unlockAchievement(
   }
 }
 
+/**
+ * Unlock multiple achievements for a user. Returns the ids that were newly
+ * unlocked by this call (for batched toasts). Order is preserved.
+ */
+export async function unlockAchievements(
+  userId: string,
+  achievementIds: string[]
+): Promise<string[]> {
+  const newlyUnlocked: string[] = [];
+  for (const id of achievementIds) {
+    const result = await unlockAchievement(userId, id);
+    if (result.newlyUnlocked) {
+      newlyUnlocked.push(id);
+    }
+  }
+  return newlyUnlocked;
+}
+
 /** Read a user's unlocked achievements map. */
 export async function getUserAchievements(
   userId: string

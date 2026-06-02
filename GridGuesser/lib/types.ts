@@ -37,6 +37,17 @@ export interface GameRoom {
   rematchCustomQuery?: string;
   nukeUsed?: boolean[];
 
+  /** True once this room was started as a rematch of a prior game. */
+  isRematch?: boolean;
+
+  // Per-game achievement tracking (per player index)
+  /** Whether each player has used any power-up this game. */
+  powerUpUsedBy?: boolean[];
+  /** Count of wrong guesses each player has made this game. */
+  wrongGuessesByPlayer?: number[];
+  /** Fewest tiles revealed on the guessed image when a player guessed correctly. */
+  minTilesAtCorrectGuess?: number[];
+
   /** Shareable code friends can use to spectate this game. */
   spectatorCode?: string;
 

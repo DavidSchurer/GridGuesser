@@ -88,33 +88,70 @@ export async function applySubmitGuessNormal(
   if (isCorrect) {
     room.gameState = "finished";
     room.winner = playerIndex;
+
+    // Track fewest tiles revealed on the guessed image for skill achievements.
+    if (!room.minTilesAtCorrectGuess) {
+      room.minTilesAtCorrectGuess = Array.from({ length: room.maxPlayers }, () => 9999);
+    }
+    const tilesOnGuessedImage = room.revealedTiles[opponentIndex]?.length ?? 0;
+    room.minTilesAtCorrectGuess[playerIndex] = Math.min(
+      room.minTilesAtCorrectGuess[playerIndex] ?? 9999,
+      tilesOnGuessedImage
+    );
+
     await updateGameRoom(room);
 
     const winnerPlayer = room.players[playerIndex];
     const loserPlayer = room.players[opponentIndex];
     const { updateUserStats, getUserById } = await import("../lib/userService");
+    const { awardGameEndAchievements, getTopUserIds } = await import("./achievementHooks");
+    const top3 = await getTopUserIds(3);
+    const rankFor = (userId: string) => {
+      const i = top3.indexOf(userId);
+      return i >= 0 ? i + 1 : undefined;
+    };
 
     if (!isSyntheticPlayer(room, playerIndex)) {
       const winnerUser = await getUserById(winnerPlayer.id);
       if (winnerUser) {
-        await updateUserStats(winnerPlayer.id, {
+        const res = await updateUserStats(winnerPlayer.id, {
           won: true,
           points: room.points[playerIndex],
           tilesRevealed: room.revealedTiles[playerIndex].length,
           guessedCorrectly: true,
-        }).catch((error) => console.error("Error updating winner stats:", error));
+        }).catch((error) => {
+          console.error("Error updating winner stats:", error);
+          return { success: false } as { success: boolean; stats?: undefined };
+        });
+        if (res.success && res.stats) {
+          await awardGameEndAchievements(io, room, playerIndex, {
+            won: true,
+            stats: res.stats,
+            leaderboardRank: rankFor(winnerPlayer.id),
+          });
+        }
       }
     }
 
     if (!isSyntheticPlayer(room, opponentIndex)) {
       const loserUser = await getUserById(loserPlayer.id);
       if (loserUser) {
-        await updateUserStats(loserPlayer.id, {
+        const res = await updateUserStats(loserPlayer.id, {
           won: false,
           points: room.points[opponentIndex],
           tilesRevealed: room.revealedTiles[opponentIndex].length,
           guessedCorrectly: false,
-        }).catch((error) => console.error("Error updating loser stats:", error));
+        }).catch((error) => {
+          console.error("Error updating loser stats:", error);
+          return { success: false } as { success: boolean; stats?: undefined };
+        });
+        if (res.success && res.stats) {
+          await awardGameEndAchievements(io, room, opponentIndex, {
+            won: false,
+            stats: res.stats,
+            leaderboardRank: rankFor(loserPlayer.id),
+          });
+        }
       }
     }
 
@@ -139,6 +176,12 @@ export async function applySubmitGuessNormal(
   if (!usedNuke) {
     room.points[playerIndex] += 1;
   }
+
+  if (!room.wrongGuessesByPlayer) {
+    room.wrongGuessesByPlayer = Array.from({ length: room.maxPlayers }, () => 0);
+  }
+  room.wrongGuessesByPlayer[playerIndex] = (room.wrongGuessesByPlayer[playerIndex] ?? 0) + 1;
+
   room.currentTurn = 1 - room.currentTurn;
 
   if (!room.guessLog) room.guessLog = [];
@@ -262,6 +305,11 @@ export async function applyPowerUpNormal(
   if (room.points[playerIndex] < cost) return { ok: false, error: "Not enough points" };
 
   room.points[playerIndex] -= cost;
+
+  if (!room.powerUpUsedBy) {
+    room.powerUpUsedBy = Array.from({ length: room.maxPlayers }, () => false);
+  }
+  room.powerUpUsedBy[playerIndex] = true;
 
   switch (powerUpId) {
     case "skip": {

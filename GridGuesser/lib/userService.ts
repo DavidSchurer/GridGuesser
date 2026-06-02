@@ -191,7 +191,7 @@ export async function updateUserStats(
     tilesRevealed: number;
     guessedCorrectly: boolean;
   }
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; error?: string; stats?: UserStats }> {
   try {
     const user = await getUserById(userId);
     if (!user) {
@@ -242,7 +242,21 @@ export async function updateUserStats(
     });
 
     await docClient.send(command);
-    return { success: true };
+
+    const newStats: UserStats = {
+      gamesPlayed: newGamesPlayed,
+      gamesWon: newGamesWon,
+      gamesLost: newGamesLost,
+      totalPoints: newTotalPoints,
+      currentStreak: newCurrentStreak,
+      bestStreak: newBestStreak,
+      averagePointsPerGame: newTotalPoints / newGamesPlayed,
+      totalTilesRevealed: newTotalTilesRevealed,
+      correctGuesses: newCorrectGuesses,
+      incorrectGuesses: newIncorrectGuesses,
+    };
+
+    return { success: true, stats: newStats };
   } catch (error) {
     console.error("Error updating user stats:", error);
     return { success: false, error: "Failed to update stats" };

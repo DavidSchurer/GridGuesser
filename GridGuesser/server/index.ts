@@ -45,15 +45,23 @@ import {
   isSyntheticPlayer,
 } from "./normalModeActions";
 import { validateCategory } from "../lib/contentFilter";
-import { unlockAchievement } from "../lib/achievementService";
+import { unlockAchievement, unlockAchievements, getUserAchievements } from "../lib/achievementService";
 import { achievementIdForPowerUp, ACHIEVEMENTS_BY_ID } from "../lib/achievements";
+import { powerUpAndArsenalAchievements } from "../lib/achievementRules";
 import { PowerUpId } from "../lib/types";
 
+/** Emit unlock toasts to the acting socket for each newly-unlocked id. */
+function emitUnlocked(socket: Socket, ids: string[]): void {
+  for (const id of ids) {
+    const def = ACHIEVEMENTS_BY_ID[id];
+    if (def) socket.emit("achievement-unlocked", { id: def.id, name: def.name });
+  }
+}
+
 /**
- * Award the "first use" power-up achievement to the acting socket's user.
- * Only logged-in, non-synthetic (non-AI) players earn achievements; guests
- * have no userId and AI players are synthetic, so both are skipped. Emits
- * `achievement-unlocked` to the acting socket only when newly unlocked.
+ * Award the "first use" power-up achievement to the acting socket's user, plus
+ * the Arsenal meta-achievement if this completes all power-up achievements.
+ * Only logged-in, non-synthetic (non-AI) players earn achievements.
  */
 async function awardPowerUpAchievement(
   socket: Socket,
@@ -66,16 +74,38 @@ async function awardPowerUpAchievement(
   if (isSyntheticPlayer(room, playerIndex)) return;
 
   const achievementId = achievementIdForPowerUp(powerUpId as PowerUpId);
-  const def = ACHIEVEMENTS_BY_ID[achievementId];
-  if (!def) return;
+  if (!ACHIEVEMENTS_BY_ID[achievementId]) return;
+
+  try {
+    const current = await getUserAchievements(userId);
+    const candidates = powerUpAndArsenalAchievements(Object.keys(current), powerUpId as PowerUpId);
+    const newly = await unlockAchievements(userId, candidates);
+    emitUnlocked(socket, newly);
+  } catch (err) {
+    console.error("Failed to award power-up achievement:", err);
+  }
+}
+
+/**
+ * Award a single achievement (e.g. first hint) to the acting socket's user.
+ * Logged-in, non-synthetic players only.
+ */
+async function awardSimpleAchievement(
+  socket: Socket,
+  room: GameRoom,
+  playerIndex: number,
+  achievementId: string
+): Promise<void> {
+  const userId = (socket as { userId?: string }).userId;
+  if (!userId) return;
+  if (isSyntheticPlayer(room, playerIndex)) return;
+  if (!ACHIEVEMENTS_BY_ID[achievementId]) return;
 
   try {
     const result = await unlockAchievement(userId, achievementId);
-    if (result.newlyUnlocked) {
-      socket.emit("achievement-unlocked", { id: def.id, name: def.name });
-    }
+    if (result.newlyUnlocked) emitUnlocked(socket, [achievementId]);
   } catch (err) {
-    console.error("Failed to award power-up achievement:", err);
+    console.error("Failed to award achievement:", err);
   }
 }
 
@@ -326,18 +356,31 @@ async function handleRoyalePlacement(roomId: string, playerIndex: number, guess:
       imageNames: room.imageNames,
     });
 
-    // Update user stats
+    // Update user stats + award achievements
+    const { updateUserStats, getUserById } = await import("../lib/userService");
+    const { awardGameEndAchievements, getTopUserIds } = await import("./achievementHooks");
+    const top3 = await getTopUserIds(3);
     for (const entry of leaderboard) {
       const player = room.players[entry.playerIndex];
-      const { updateUserStats, getUserById } = await import("../lib/userService");
       const user = await getUserById(player.id);
       if (user) {
-        await updateUserStats(player.id, {
+        const res = await updateUserStats(player.id, {
           won: entry.place === 1,
           points: room.points[entry.playerIndex],
           tilesRevealed: room.revealedTiles[entry.playerIndex]?.length || 0,
           guessedCorrectly: entry.place <= room.maxPlayers - 1,
-        }).catch(err => console.error("Error updating royale stats:", err));
+        }).catch(err => {
+          console.error("Error updating royale stats:", err);
+          return { success: false } as { success: boolean; stats?: undefined };
+        });
+        if (res.success && res.stats) {
+          const rankIdx = top3.indexOf(player.id);
+          await awardGameEndAchievements(io, room, entry.playerIndex, {
+            won: entry.place === 1,
+            stats: res.stats,
+            leaderboardRank: rankIdx >= 0 ? rankIdx + 1 : undefined,
+          });
+        }
       }
     }
 
@@ -928,6 +971,11 @@ io.on("connection", (socket: Socket) => {
     // Deduct points
     room.points[playerIndex] -= cost;
 
+    if (!room.powerUpUsedBy) {
+      room.powerUpUsedBy = Array.from({ length: room.maxPlayers }, () => false);
+    }
+    room.powerUpUsedBy[playerIndex] = true;
+
     // Execute power-up
     switch (powerUpId) {
       case "skip":
@@ -1150,6 +1198,7 @@ io.on("connection", (socket: Socket) => {
           return;
         }
         callback(true);
+        await awardSimpleAchievement(socket, room, playerIndex, "first_hint");
         return;
       }
 
@@ -1230,6 +1279,7 @@ io.on("connection", (socket: Socket) => {
         `💡 Hint: Player ${playerIndex} revealed letter "${answer[idx]}" (index ${idx}) for target ${targetIdx} "${answer}" (${HINT_COST} pts)`
       );
       callback(true);
+      await awardSimpleAchievement(socket, room, playerIndex, "first_hint");
     }
   );
 
@@ -1309,6 +1359,12 @@ io.on("connection", (socket: Socket) => {
         room.rematchCategory = undefined;
         room.rematchCustomQuery = undefined;
         room.nukeUsed = Array(n).fill(false);
+
+        // Mark as a rematch and reset per-game achievement tracking.
+        room.isRematch = true;
+        room.powerUpUsedBy = Array(n).fill(false);
+        room.wrongGuessesByPlayer = Array(n).fill(0);
+        room.minTilesAtCorrectGuess = Array(n).fill(9999);
 
         // Reset royale-specific fields
         if (room.gameMode === 'royale') {
@@ -1513,6 +1569,14 @@ io.on("connection", (socket: Socket) => {
     });
 
     if (isCorrect) {
+      if (!room.minTilesAtCorrectGuess) {
+        room.minTilesAtCorrectGuess = Array.from({ length: room.maxPlayers }, () => 9999);
+      }
+      const tilesOnGuessedImage = room.revealedTiles[targetPlayerIndex]?.length ?? 0;
+      room.minTilesAtCorrectGuess[playerIndex] = Math.min(
+        room.minTilesAtCorrectGuess[playerIndex] ?? 9999,
+        tilesOnGuessedImage
+      );
       await updateGameRoom(room);
 
       io.to(roomId).emit("royale-correct-guess", {
@@ -1531,6 +1595,12 @@ io.on("connection", (socket: Socket) => {
       if (!usedNuke) {
         room.points[playerIndex] += 1;
       }
+
+      if (!room.wrongGuessesByPlayer) {
+        room.wrongGuessesByPlayer = Array.from({ length: room.maxPlayers }, () => 0);
+      }
+      room.wrongGuessesByPlayer[playerIndex] = (room.wrongGuessesByPlayer[playerIndex] ?? 0) + 1;
+
       await updateGameRoom(room);
 
       io.to(roomId).emit("royale-wrong-guess", {
