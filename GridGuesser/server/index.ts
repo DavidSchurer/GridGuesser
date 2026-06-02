@@ -42,8 +42,42 @@ import {
   applySubmitGuessNormal,
   applyUseHintNormal,
   applyPowerUpNormal,
+  isSyntheticPlayer,
 } from "./normalModeActions";
 import { validateCategory } from "../lib/contentFilter";
+import { unlockAchievement } from "../lib/achievementService";
+import { achievementIdForPowerUp, ACHIEVEMENTS_BY_ID } from "../lib/achievements";
+import { PowerUpId } from "../lib/types";
+
+/**
+ * Award the "first use" power-up achievement to the acting socket's user.
+ * Only logged-in, non-synthetic (non-AI) players earn achievements; guests
+ * have no userId and AI players are synthetic, so both are skipped. Emits
+ * `achievement-unlocked` to the acting socket only when newly unlocked.
+ */
+async function awardPowerUpAchievement(
+  socket: Socket,
+  room: GameRoom,
+  playerIndex: number,
+  powerUpId: string
+): Promise<void> {
+  const userId = (socket as { userId?: string }).userId;
+  if (!userId) return;
+  if (isSyntheticPlayer(room, playerIndex)) return;
+
+  const achievementId = achievementIdForPowerUp(powerUpId as PowerUpId);
+  const def = ACHIEVEMENTS_BY_ID[achievementId];
+  if (!def) return;
+
+  try {
+    const result = await unlockAchievement(userId, achievementId);
+    if (result.newlyUnlocked) {
+      socket.emit("achievement-unlocked", { id: def.id, name: def.name });
+    }
+  } catch (err) {
+    console.error("Failed to award power-up achievement:", err);
+  }
+}
 
 const app = express();
 const httpServer = createServer(app);
@@ -91,6 +125,8 @@ import authRoutes from "./authRoutes";
 app.use("/api/auth", authRoutes);
 import leaderboardRoutes from "./leaderboardRoutes";
 app.use("/api/leaderboard", leaderboardRoutes);
+import achievementRoutes from "./achievementRoutes";
+app.use("/api/achievements", achievementRoutes);
 
 // Health check endpoint
 app.get("/api/health", (req, res) => {
@@ -857,6 +893,7 @@ io.on("connection", (socket: Socket) => {
         return;
       }
       callback(true);
+      await awardPowerUpAchievement(socket, result.room, playerIndex, powerUpId);
       if (result.room.vsAi && result.room.currentTurn === 1 && result.room.gameState === "playing") {
         scheduleAiTurn(roomId, io);
       }
@@ -1085,6 +1122,7 @@ io.on("connection", (socket: Socket) => {
     // Update room in DynamoDB
     await updateGameRoom(room);
     callback(true);
+    await awardPowerUpAchievement(socket, room, playerIndex, powerUpId);
   });
 
   // Use a hint – reveal one letter of the opponent's image name

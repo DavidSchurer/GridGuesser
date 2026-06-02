@@ -222,6 +222,11 @@ export default function GameRoomPage() {
       });
     });
 
+    // Listen for achievement unlocks (real-time toast)
+    socketInstance.on("achievement-unlocked", (data: { id: string; name: string }) => {
+      showNotification(`Achievement unlocked: ${data.name}!`);
+    });
+
     // Listen for game start
     socketInstance.on("game-start", (data: { roomId: string; players: any[]; currentTurn: number; gameMode?: GameMode; maxPlayers?: number; vsAi?: boolean }) => {
       setOpponentConnected(true);

@@ -136,6 +136,9 @@ export interface User {
   
   // Game Statistics
   stats: UserStats;
+
+  // Unlocked achievements, keyed by achievement id
+  achievements?: Record<string, { unlockedAt: number }>;
   
   // Optional fields
   avatarUrl?: string;

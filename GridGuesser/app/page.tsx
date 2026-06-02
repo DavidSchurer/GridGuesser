@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import UserProfile from "../components/UserProfile";
 import Leaderboard from "../components/Leaderboard";
+import Achievements from "../components/Achievements";
 import CategorySelector from "../components/CategorySelector";
 import GameModeSelector from "../components/GameModeSelector";
 import { useAuth } from "../lib/authContext";
@@ -214,6 +215,7 @@ export default function Home() {
       <div className="absolute top-4 right-4 flex flex-col items-end gap-2">
         <UserProfile />
         <Leaderboard />
+        <Achievements />
       </div>
       
       <div className="max-w-2xl w-full">
