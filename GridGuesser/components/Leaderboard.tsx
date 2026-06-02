@@ -15,11 +15,10 @@ interface LeaderboardEntry {
   currentStreak: number;
 }
 
-const API_URL =
-  process.env.NEXT_PUBLIC_API_URL ||
-  (process.env.NEXT_PUBLIC_SOCKET_URL
-    ? `${process.env.NEXT_PUBLIC_SOCKET_URL}/api`
-    : "http://localhost:3001/api");
+import { getClientApiBase } from "../lib/clientApi";
+import { getAuthHeaders } from "../lib/authStorage";
+
+const API_URL = getClientApiBase();
 
 const FILTERS: { id: LeaderboardFilter; label: string }[] = [
   { id: "winRate", label: "Win Rate" },
@@ -63,6 +62,7 @@ export default function Leaderboard() {
       const res = await fetch(`${API_URL}/leaderboard?filter=${selected}`, {
         method: "GET",
         credentials: "include",
+        headers: getAuthHeaders(),
       });
       if (!res.ok) {
         throw new Error(`HTTP ${res.status}`);

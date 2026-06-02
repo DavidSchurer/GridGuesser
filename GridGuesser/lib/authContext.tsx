@@ -1,7 +1,14 @@
 "use client";
 
-import React, { createContext, useContext, useState, useEffect } from "react";
+import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
 import { AuthResponse, UserStats } from "./types";
+import { getClientApiBase } from "./clientApi";
+import {
+  getStoredAuthToken,
+  setStoredAuthToken,
+  clearStoredAuthToken,
+  getAuthHeaders,
+} from "./authStorage";
 
 interface AuthUser {
   userId: string;
@@ -22,19 +29,50 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || (process.env.NEXT_PUBLIC_SOCKET_URL ? `${process.env.NEXT_PUBLIC_SOCKET_URL}/api` : "http://localhost:3001/api");
+const API_URL = getClientApiBase();
+
+async function authFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  const headers = new Headers(init.headers);
+  const authHeaders = getAuthHeaders() as Record<string, string>;
+  if (authHeaders.Authorization) {
+    headers.set("Authorization", authHeaders.Authorization);
+  }
+  if (init.body && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+
+  return fetch(`${API_URL}${path}`, {
+    ...init,
+    headers,
+    credentials: "include",
+  });
+}
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const verifySession = async (): Promise<boolean> => {
+  const refreshProfile = useCallback(async () => {
     try {
-      const response = await fetch(`${API_URL}/auth/verify`, {
-        method: "GET",
-        credentials: "include", // Send cookies
-      });
+      const response = await authFetch("/auth/profile", { method: "GET" });
+      const data = await response.json();
+
+      if (data.success && data.user) {
+        setUser(data.user);
+      } else if (response.status === 401) {
+        setUser(null);
+        setToken(null);
+        clearStoredAuthToken();
+      }
+    } catch (error) {
+      console.error("Error refreshing profile:", error);
+    }
+  }, []);
+
+  const verifySession = useCallback(async (): Promise<boolean> => {
+    try {
+      const response = await authFetch("/auth/verify", { method: "GET" });
 
       if (!response.ok) {
         return false;
@@ -42,7 +80,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       const data = await response.json();
       if (data.success && data.user) {
-        // Session is valid, fetch full profile
         await refreshProfile();
         return true;
       }
@@ -51,40 +88,43 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       console.error("Session verification error:", error);
       return false;
     }
-  };
+  }, [refreshProfile]);
 
-  // Load user from server on mount (checks cookie)
+  // Restore session from cookie and/or persisted token on mount
   useEffect(() => {
+    const stored = getStoredAuthToken();
+    if (stored) {
+      setToken(stored);
+    }
+
     verifySession()
       .then((valid) => {
         if (!valid) {
           setUser(null);
           setToken(null);
+          clearStoredAuthToken();
         }
       })
       .finally(() => {
         setLoading(false);
       });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [verifySession]);
 
   const login = async (email: string, password: string) => {
     try {
-      const response = await fetch(`${API_URL}/auth/login`, {
+      const response = await authFetch("/auth/login", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        credentials: "include", // Send/receive cookies
         body: JSON.stringify({ email, password }),
       });
 
       const data: AuthResponse = await response.json();
 
       if (data.success && data.user) {
-        // Cookie is set by server automatically
+        if (data.token) {
+          setStoredAuthToken(data.token);
+          setToken(data.token);
+        }
         setUser(data.user);
-        setToken(null); // Don't store token in frontend
         return { success: true };
       }
 
@@ -97,21 +137,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signup = async (username: string, email: string, password: string) => {
     try {
-      const response = await fetch(`${API_URL}/auth/signup`, {
+      const response = await authFetch("/auth/signup", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        credentials: "include", // Send/receive cookies
         body: JSON.stringify({ username, email, password }),
       });
 
       const data: AuthResponse = await response.json();
 
       if (data.success && data.user) {
-        // Cookie is set by server automatically
+        if (data.token) {
+          setStoredAuthToken(data.token);
+          setToken(data.token);
+        }
         setUser(data.user);
-        setToken(null); // Don't store token in frontend
         return { success: true };
       }
 
@@ -124,33 +162,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = async () => {
     try {
-      await fetch(`${API_URL}/auth/logout`, {
-        method: "POST",
-        credentials: "include", // Send cookies
-      });
+      await authFetch("/auth/logout", { method: "POST" });
     } catch (error) {
       console.error("Logout error:", error);
     } finally {
-      // Clear state regardless
       setUser(null);
       setToken(null);
-    }
-  };
-
-  const refreshProfile = async () => {
-    try {
-      const response = await fetch(`${API_URL}/auth/profile`, {
-        method: "GET",
-        credentials: "include", // Send cookies
-      });
-
-      const data = await response.json();
-
-      if (data.success && data.user) {
-        setUser(data.user);
-      }
-    } catch (error) {
-      console.error("Error refreshing profile:", error);
+      clearStoredAuthToken();
     }
   };
 
@@ -168,4 +186,3 @@ export function useAuth() {
   }
   return context;
 }
-

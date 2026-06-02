@@ -1,20 +1,15 @@
 import { Router, Request, Response } from "express";
-import { verifyToken } from "../lib/jwt";
 import { getUserAchievements } from "../lib/achievementService";
+import { getAuthPayloadFromRequest } from "./authHelpers";
 
 const router = Router();
-
-const getTokenFromCookie = (req: Request): string | null => {
-  return req.cookies?.auth_token || null;
-};
 
 // Get the current user's unlocked achievements.
 // Guests (no/invalid token) get a 200 with loggedIn:false so the client can
 // render a fully-locked modal with a "log in" prompt.
 router.get("/", async (req: Request, res: Response) => {
   try {
-    const token = getTokenFromCookie(req);
-    const payload = token ? verifyToken(token) : null;
+    const payload = getAuthPayloadFromRequest(req);
 
     if (!payload) {
       res.status(200).json({ success: true, loggedIn: false, unlocked: {} });

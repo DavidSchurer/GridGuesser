@@ -1,7 +1,7 @@
 import jwt from "jsonwebtoken";
 
 const JWT_SECRET = process.env.JWT_SECRET || "your-secret-key-change-this-in-production";
-const JWT_EXPIRES_IN = "7d"; // Token expires in 7 days
+const JWT_EXPIRES_IN = "30d"; // Match AUTH_SESSION_MAX_AGE_MS in server/authCookie.ts
 
 export interface JWTPayload {
   userId: string;

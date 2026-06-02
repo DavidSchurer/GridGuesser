@@ -530,23 +530,25 @@ setInterval(async () => {
   }
 }, 5 * 60 * 1000); // Run every 5 minutes
 
-// Socket.IO authentication middleware - get token from cookie
+// Socket.IO authentication — cookie and/or handshake auth token (localStorage fallback)
 io.use((socket, next) => {
-  // Get token from cookie header
+  let token: string | null = null;
+
   const cookies = socket.handshake.headers.cookie;
-  let token = null;
-  
   if (cookies) {
-    const cookieArray = cookies.split(';');
-    for (const cookie of cookieArray) {
-      const [name, value] = cookie.trim().split('=');
-      if (name === 'auth_token') {
+    for (const cookie of cookies.split(";")) {
+      const [name, value] = cookie.trim().split("=");
+      if (name === "auth_token" && value) {
         token = value;
         break;
       }
     }
   }
-  
+
+  if (!token && socket.handshake.auth?.token && typeof socket.handshake.auth.token === "string") {
+    token = socket.handshake.auth.token;
+  }
+
   if (token) {
     const payload = verifyToken(token);
     if (payload) {

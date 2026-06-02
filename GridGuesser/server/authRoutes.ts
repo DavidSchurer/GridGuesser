@@ -5,16 +5,13 @@ import {
   verifyPassword,
   updateUserProfile,
 } from "../lib/userService";
-import { generateToken, verifyToken } from "../lib/jwt";
+import { generateToken } from "../lib/jwt";
 import { authenticateToken } from "../lib/authMiddleware";
 import { AuthResponse, SignupRequest, LoginRequest } from "../lib/types";
+import { getAuthCookieOptions, getClearAuthCookieOptions } from "./authCookie";
+import { getAuthPayloadFromRequest, getAuthTokenFromRequest } from "./authHelpers";
 
 const router = Router();
-
-// Middleware to get token from cookie
-const getTokenFromCookie = (req: Request): string | null => {
-  return req.cookies?.auth_token || null;
-};
 
 // Signup endpoint
 router.post("/signup", async (req: Request, res: Response) => {
@@ -76,17 +73,12 @@ router.post("/signup", async (req: Request, res: Response) => {
       username: result.user.username,
     });
 
-    // Set HTTP-only cookie
-    res.cookie('auth_token', token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-    });
+    res.cookie("auth_token", token, getAuthCookieOptions());
 
     res.status(201).json({
       success: true,
       message: "User created successfully",
+      token,
       user: {
         userId: result.user.userId,
         username: result.user.username,
@@ -135,17 +127,12 @@ router.post("/login", async (req: Request, res: Response) => {
       username: result.user.username,
     });
 
-    // Set HTTP-only cookie
-    res.cookie('auth_token', token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-    });
+    res.cookie("auth_token", token, getAuthCookieOptions());
 
     res.status(200).json({
       success: true,
       message: "Login successful",
+      token,
       user: {
         userId: result.user.userId,
         username: result.user.username,
@@ -164,7 +151,7 @@ router.post("/login", async (req: Request, res: Response) => {
 
 // Logout endpoint
 router.post("/logout", (req: Request, res: Response) => {
-  res.clearCookie('auth_token');
+  res.clearCookie("auth_token", getClearAuthCookieOptions());
   res.status(200).json({
     success: true,
     message: "Logged out successfully",
@@ -174,24 +161,12 @@ router.post("/logout", (req: Request, res: Response) => {
 // Get current user profile (protected route)
 router.get("/profile", async (req: Request, res: Response) => {
   try {
-    // Get token from cookie
-    const token = getTokenFromCookie(req);
-    
-    if (!token) {
-      res.status(401).json({
-        success: false,
-        message: "Not authenticated",
-      });
-      return;
-    }
+    const payload = getAuthPayloadFromRequest(req);
 
-    // Verify token
-    const payload = verifyToken(token);
-    
     if (!payload) {
       res.status(401).json({
         success: false,
-        message: "Invalid or expired session",
+        message: "Not authenticated",
       });
       return;
     }
@@ -230,24 +205,12 @@ router.get("/profile", async (req: Request, res: Response) => {
 // Update user profile (protected route)
 router.patch("/profile", async (req: Request, res: Response) => {
   try {
-    // Get token from cookie
-    const token = getTokenFromCookie(req);
-    
-    if (!token) {
-      res.status(401).json({
-        success: false,
-        message: "Not authenticated",
-      });
-      return;
-    }
+    const payload = getAuthPayloadFromRequest(req);
 
-    // Verify token
-    const payload = verifyToken(token);
-    
     if (!payload) {
       res.status(401).json({
         success: false,
-        message: "Invalid or expired session",
+        message: "Not authenticated",
       });
       return;
     }
@@ -283,22 +246,12 @@ router.patch("/profile", async (req: Request, res: Response) => {
 
 // Verify token endpoint (useful for checking if user is still logged in)
 router.get("/verify", (req: Request, res: Response) => {
-  const token = getTokenFromCookie(req);
-  
-  if (!token) {
-    res.status(401).json({
-      success: false,
-      message: "Not authenticated",
-    });
-    return;
-  }
+  const payload = getAuthPayloadFromRequest(req);
 
-  const payload = verifyToken(token);
-  
   if (!payload) {
     res.status(401).json({
       success: false,
-      message: "Invalid or expired session",
+      message: "Not authenticated",
     });
     return;
   }

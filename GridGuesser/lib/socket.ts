@@ -1,26 +1,32 @@
 "use client";
 
 import { io, Socket } from "socket.io-client";
+import { getStoredAuthToken } from "./authStorage";
 
 let socket: Socket | null = null;
 
 export const getSocket = (): Socket => {
   if (!socket) {
-    // Cookies are sent automatically with withCredentials
+    const token = getStoredAuthToken();
     socket = io(process.env.NEXT_PUBLIC_SOCKET_URL || "http://localhost:3001", {
       autoConnect: false,
-      withCredentials: true, // Send cookies with Socket.IO requests
+      withCredentials: true,
+      auth: token ? { token } : {},
     });
   }
   return socket;
 };
 
 export const connectSocket = (): Socket => {
-  const socket = getSocket();
-  if (!socket.connected) {
-    socket.connect();
+  const s = getSocket();
+  const token = getStoredAuthToken();
+  if (token) {
+    s.auth = { token };
   }
-  return socket;
+  if (!s.connected) {
+    s.connect();
+  }
+  return s;
 };
 
 export const disconnectSocket = () => {
@@ -30,9 +36,8 @@ export const disconnectSocket = () => {
   }
 };
 
-// Reconnect (for when user logs in/out)
+/** Reconnect after login/logout so the server gets the latest auth token. */
 export const reconnectSocket = () => {
   disconnectSocket();
   return connectSocket();
 };
-

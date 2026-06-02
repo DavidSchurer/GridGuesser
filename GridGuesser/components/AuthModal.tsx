@@ -40,6 +40,8 @@ export default function AuthModal({ isOpen, onClose, defaultMode = "login" }: Au
         const result = await signup(formData.username, formData.email, formData.password);
         
         if (result.success) {
+          const { reconnectSocket } = await import("../lib/socket");
+          reconnectSocket();
           onClose();
         } else {
           setError(result.message || "Signup failed");
@@ -48,6 +50,8 @@ export default function AuthModal({ isOpen, onClose, defaultMode = "login" }: Au
         const result = await login(formData.email, formData.password);
         
         if (result.success) {
+          const { reconnectSocket } = await import("../lib/socket");
+          reconnectSocket();
           onClose();
         } else {
           setError(result.message || "Login failed");

@@ -9,12 +9,11 @@ import {
   AchievementTier,
   AchievementDef,
 } from "../lib/achievements";
+import { useAuth } from "../lib/authContext";
+import { getClientApiBase } from "../lib/clientApi";
+import { getAuthHeaders } from "../lib/authStorage";
 
-const API_URL =
-  process.env.NEXT_PUBLIC_API_URL ||
-  (process.env.NEXT_PUBLIC_SOCKET_URL
-    ? `${process.env.NEXT_PUBLIC_SOCKET_URL}/api`
-    : "http://localhost:3001/api");
+const API_URL = getClientApiBase();
 
 type UnlockedMap = Record<string, { unlockedAt: number }>;
 
@@ -260,11 +259,14 @@ function AchievementCard({
 }
 
 export default function Achievements() {
+  const { user, loading: authLoading } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
-  const [loggedIn, setLoggedIn] = useState(false);
+  const [loggedInFromApi, setLoggedInFromApi] = useState(false);
   const [unlocked, setUnlocked] = useState<UnlockedMap>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const isLoggedIn = !!user || loggedInFromApi;
 
   const fetchAchievements = useCallback(async () => {
     setLoading(true);
@@ -273,13 +275,14 @@ export default function Achievements() {
       const res = await fetch(`${API_URL}/achievements`, {
         method: "GET",
         credentials: "include",
+        headers: getAuthHeaders(),
       });
       if (!res.ok) {
         throw new Error(`HTTP ${res.status}`);
       }
       const data = await res.json();
       if (data.success) {
-        setLoggedIn(Boolean(data.loggedIn));
+        setLoggedInFromApi(Boolean(data.loggedIn));
         setUnlocked(data.unlocked || {});
       } else {
         throw new Error(data.message || "Failed to load achievements");
@@ -294,9 +297,9 @@ export default function Achievements() {
   }, []);
 
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen || authLoading) return;
     fetchAchievements();
-  }, [isOpen, fetchAchievements]);
+  }, [isOpen, authLoading, user, fetchAchievements]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -400,7 +403,7 @@ export default function Achievements() {
               </div>
             </div>
 
-            {!loading && !error && !loggedIn && (
+            {!loading && !error && !authLoading && !isLoggedIn && (
               <div
                 className="mx-6 mt-3 px-4 py-3 rounded-lg bg-blue-500/15 border border-blue-400/30 text-sm text-blue-200"
                 data-testid="achievements-login-prompt"
